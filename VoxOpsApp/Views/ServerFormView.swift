@@ -23,6 +23,7 @@ struct ServerFormView: View {
     @State private var discovered: [DiscoveredServer] = []
     @State private var isScanning: Bool = false
     private let existingId: UUID?
+    private var isEditing: Bool { existingId != nil }
 
     init(server: AgentServer? = nil, onSave: @escaping (AgentServer) -> Void) {
         self.onSave = onSave
@@ -34,61 +35,97 @@ struct ServerFormView: View {
     }
 
     var body: some View {
-        Form {
-            if existingId == nil {
-                discoverySection
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text(isEditing ? "Edit Server" : "Add Server")
+                    .font(.headline)
+                Spacer()
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
 
-            Section("Server Details") {
-                TextField("Name", text: $name)
-                Picker("Type", selection: $serverType) {
-                    Text("OpenClaw").tag(ServerType.openclaw)
-                    Text("Hermes").tag(ServerType.hermes)
+            Form {
+                if !isEditing {
+                    discoverySection
                 }
-                .onChange(of: serverType) { _, newType in
-                    if url.isEmpty {
-                        url = newType == .openclaw ? "ws://127.0.0.1:18789" : "http://127.0.0.1:8642"
+
+                Section {
+                    TextField("Name", text: $name)
+                    Picker("Type", selection: $serverType) {
+                        Text("OpenClaw").tag(ServerType.openclaw)
+                        Text("Hermes").tag(ServerType.hermes)
+                    }
+                    .onChange(of: serverType) { _, newType in
+                        if url.isEmpty {
+                            url = newType == .openclaw ? "ws://127.0.0.1:18789" : "http://127.0.0.1:8642"
+                        }
+                    }
+                    TextField("URL", text: $url)
+                    SecureField("Token (optional)", text: $token)
+                } header: {
+                    Text("Configuration")
+                }
+
+                if let result = testResult {
+                    Section {
+                        Label(result, systemImage: result.contains("Success") ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .font(.callout)
+                            .foregroundStyle(result.contains("Success") ? .green : .red)
                     }
                 }
-                TextField("URL", text: $url)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("Token", text: $token)
-                    .textFieldStyle(.roundedBorder)
             }
+            .formStyle(.grouped)
 
-            if let result = testResult {
-                Text(result)
-                    .font(.caption)
-                    .foregroundStyle(result.contains("Success") ? .green : .red)
-            }
-
-            HStack {
+            // Footer buttons
+            HStack(spacing: 12) {
                 Button("Test Connection") { testConnection() }
+                    .controlSize(.regular)
                     .disabled(isTesting || url.isEmpty)
+
+                if isTesting {
+                    ProgressView().controlSize(.small)
+                }
+
                 Spacer()
+
                 Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+
                 Button("Save") { save() }
-                    .disabled(name.isEmpty || url.isEmpty)
                     .keyboardShortcut(.defaultAction)
+                    .disabled(name.isEmpty || url.isEmpty)
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+            .padding(.top, 4)
         }
-        .padding()
-        .frame(width: 420)
+        .frame(width: 440, height: isEditing ? 320 : nil)
         .onAppear {
-            if existingId == nil { scanLocalhost() }
+            if !isEditing { scanLocalhost() }
         }
     }
 
+    // MARK: - Discovery
+
     private var discoverySection: some View {
-        Section("Local Discovery") {
+        Section {
             if isScanning {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Scanning localhost...").font(.caption).foregroundStyle(.secondary)
+                    Text("Scanning localhost...").foregroundStyle(.secondary)
                 }
             } else if discovered.isEmpty {
-                Text("No servers found on localhost").font(.caption).foregroundStyle(.secondary)
-                Button("Rescan") { scanLocalhost() }.font(.caption)
+                HStack {
+                    Image(systemName: "network.slash")
+                        .foregroundStyle(.tertiary)
+                    Text("No servers found on localhost")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Rescan") { scanLocalhost() }
+                        .controlSize(.small)
+                }
             } else {
                 ForEach(discovered) { server in
                     Button {
@@ -97,20 +134,28 @@ struct ServerFormView: View {
                         url = server.url
                         if let t = server.token { token = t }
                     } label: {
-                        HStack {
-                            Circle().fill(.green).frame(width: 6, height: 6)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(server.name).font(.body)
+                        HStack(spacing: 8) {
+                            Image(systemName: server.type == .openclaw ? "bolt.circle.fill" : "globe")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(server.name).foregroundStyle(.primary)
                                 Text(server.url).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Image(systemName: "arrow.right.circle").foregroundStyle(.secondary)
+                            Image(systemName: "plus.circle")
+                                .foregroundStyle(Color.accentColor)
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
-                Button("Rescan") { scanLocalhost() }.font(.caption)
+                HStack {
+                    Spacer()
+                    Button("Rescan") { scanLocalhost() }.controlSize(.small)
+                }
             }
+        } header: {
+            Text("Discovered")
         }
     }
 
@@ -153,16 +198,13 @@ struct ServerFormView: View {
         }
     }
 
-    /// Reads the OpenClaw gateway token from ~/.openclaw/gateway-token or ~/.openclaw/.env
     private static func readLocalOpenClawToken() -> String? {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        // Try gateway-token file first (plain text, single line)
         let tokenFile = home.appendingPathComponent(".openclaw/gateway-token")
         if let raw = try? String(contentsOf: tokenFile, encoding: .utf8) {
             let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !token.isEmpty { return token }
         }
-        // Fallback: parse OPENCLAW_GATEWAY_TOKEN from .env
         let envFile = home.appendingPathComponent(".openclaw/.env")
         if let contents = try? String(contentsOf: envFile, encoding: .utf8) {
             for line in contents.components(separatedBy: .newlines) {
@@ -181,7 +223,6 @@ struct ServerFormView: View {
 
     private func probePort(host: String, port: Int, type: ServerType) async -> Bool {
         if type == .hermes {
-            // HTTP health check
             guard let url = URL(string: "http://\(host):\(port)/health") else { return false }
             var request = URLRequest(url: url)
             request.timeoutInterval = 2
@@ -189,7 +230,6 @@ struct ServerFormView: View {
                   let http = response as? HTTPURLResponse else { return false }
             return http.statusCode == 200
         } else {
-            // TCP connect check for WebSocket ports
             return await withCheckedContinuation { continuation in
                 let lock = NSLock()
                 var hasResumed = false
@@ -252,11 +292,11 @@ struct ServerFormView: View {
             if serverType == .hermes {
                 let tempServer = AgentServer(name: "test", type: .hermes, url: url, enabled: true)
                 guard let client = try? HermesClient(server: tempServer, token: token.isEmpty ? nil : token) else {
-                    testResult = "Failed — invalid URL"
+                    testResult = "Invalid URL"
                     return
                 }
                 let ok = await client.healthCheck()
-                testResult = ok ? "Success — connected" : "Failed — server unreachable"
+                testResult = ok ? "Success — connected" : "Server unreachable"
             } else {
                 do {
                     let client = OpenClawClient(serverId: UUID(), url: testURL, token: token.isEmpty ? "" : token)

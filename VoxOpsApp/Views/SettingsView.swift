@@ -10,90 +10,106 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
-            audioTab.tabItem { Label("Audio", systemImage: "mic") }
+            audioTab.tabItem { Label("Audio", systemImage: "waveform") }
             AgentSettingsView(appState: appState).tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
         }
-        .frame(width: 450, height: 400)
+        .frame(width: 480, height: 420)
         .onAppear {
             selectedBackend = appState.selectedBackend
         }
     }
 
+    // MARK: - General
+
     private var generalTab: some View {
         Form {
-            Section("Push-to-Talk Trigger") {
-                Text("Current: \(appState.currentTrigger.displayString)")
-                    .font(.headline)
+            Section {
+                LabeledContent("Voice Hotkey") {
+                    HStack(spacing: 8) {
+                        Text(appState.currentTrigger.displayString)
+                            .font(.system(.body, design: .monospaced))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.quaternary)
+                            .cornerRadius(6)
 
-                // Keyboard recorder
-                Button(isRecording ? "Press your shortcut..." : "Record Keyboard Shortcut...") {
-                    isRecording = true
-                    recordingError = nil
-                }
-                .disabled(isRecording)
-                .onKeyDown(isActive: $isRecording) { keyCode, modifiers in
-                    // Escape cancels
-                    if keyCode == 0x35 {
-                        isRecording = false
-                        recordingError = nil
-                        return true
+                        Button(isRecording ? "Press shortcut..." : "Change") {
+                            isRecording = true
+                            recordingError = nil
+                        }
+                        .controlSize(.small)
+                        .disabled(isRecording)
+                        .onKeyDown(isActive: $isRecording) { keyCode, modifiers in
+                            if keyCode == 0x35 {
+                                isRecording = false
+                                recordingError = nil
+                                return true
+                            }
+                            let modifierKeys = modifiers.toModifierKeys()
+                            guard !modifierKeys.isEmpty else { return false }
+                            let trigger = HotkeyTrigger(keyCode: keyCode, modifiers: modifierKeys.sorted())
+                            if let error = trigger.validate() {
+                                recordingError = error
+                                return true
+                            }
+                            if trigger == appState.chatTrigger {
+                                recordingError = "Conflicts with chat hotkey"
+                                return true
+                            }
+                            isRecording = false
+                            recordingError = nil
+                            appState.saveTrigger(trigger)
+                            return true
+                        }
+
+                        Button("Reset") {
+                            appState.saveTrigger(.default)
+                        }
+                        .controlSize(.small)
                     }
-                    let modifierKeys = modifiers.toModifierKeys()
-                    guard !modifierKeys.isEmpty else { return false } // Wait for modifier + key
-                    let trigger = HotkeyTrigger(keyCode: keyCode, modifiers: modifierKeys.sorted())
-                    if let error = trigger.validate() {
-                        recordingError = error
-                        return true
-                    }
-                    if trigger == appState.chatTrigger {
-                        recordingError = "Cannot be the same as chat hotkey"
-                        return true
-                    }
-                    isRecording = false
-                    recordingError = nil
-                    appState.saveTrigger(trigger)
-                    return true
                 }
 
                 if let error = recordingError {
                     Text(error).foregroundStyle(.red).font(.caption)
                 }
-
-                Button("Reset to Default") {
-                    appState.saveTrigger(.default)
-                }
-                .font(.caption)
+            } header: {
+                Text("Push-to-Talk")
             }
 
-            Section("After Injection") {
-                Toggle("Press Enter after pasting text", isOn: Binding(
+            Section {
+                Toggle("Press Enter after pasting", isOn: Binding(
                     get: { appState.autoEnterEnabled },
                     set: { appState.saveAutoEnter($0) }
                 ))
-                Text("Sends Return keystroke after text is injected.")
-                    .font(.caption).foregroundStyle(.tertiary)
+            } header: {
+                Text("Text Injection")
+            } footer: {
+                Text("Automatically sends a Return keystroke after text is injected at the cursor.")
             }
 
-            Section("History") {
-                Stepper("Show last \(appState.historyLimit) transcriptions", value: Binding(
-                    get: { appState.historyLimit },
-                    set: { appState.setHistoryLimit($0) }
-                ), in: 1...20)
-            }
-
-            Section("STT Backend") {
-                Picker("Backend", selection: $selectedBackend) {
+            Section {
+                Picker("Speech-to-Text Engine", selection: $selectedBackend) {
                     Text("whisper.cpp").tag("whisper.cpp")
                     Text("MLX Whisper").tag("mlx-whisper")
                 }
                 .onChange(of: selectedBackend) { _, newValue in appState.selectedBackend = newValue }
+
+                Stepper("History: last \(appState.historyLimit)", value: Binding(
+                    get: { appState.historyLimit },
+                    set: { appState.setHistoryLimit($0) }
+                ), in: 1...20)
+            } header: {
+                Text("Engine")
             }
-        }.padding()
+        }
+        .formStyle(.grouped)
     }
+
+    // MARK: - Audio
 
     private var audioTab: some View {
         Form {
-            Section("Microphone") {
+            Section {
                 Picker("Input Device", selection: Binding(
                     get: { appState.selectedDeviceId },
                     set: { appState.setAudioDevice($0) }
@@ -103,14 +119,18 @@ struct SettingsView: View {
                         Text(device.name).tag(device.id)
                     }
                 }
+            } header: {
+                Text("Microphone")
+            } footer: {
+                Text("Select which microphone VoxOps uses for voice capture.")
             }
-        }.padding()
+        }
+        .formStyle(.grouped)
     }
 }
 
 // MARK: - Key event capture for the recorder
 
-/// View modifier that captures key events via NSEvent local monitor — only active when `isActive` is true
 struct KeyDownHandler: ViewModifier {
     @Binding var isActive: Bool
     let handler: (UInt16, NSEvent.ModifierFlags) -> Bool
@@ -122,7 +142,7 @@ struct KeyDownHandler: ViewModifier {
                 if active {
                     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                         if handler(UInt16(event.keyCode), event.modifierFlags) {
-                            return nil // consumed
+                            return nil
                         }
                         return event
                     }
