@@ -1,0 +1,60 @@
+name: VoxOps
+options:
+  bundleIdPrefix: com.voxops
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: "7.0.0"
+
+targets:
+  VoxOpsCore:
+    type: framework
+    platform: macOS
+    sources:
+      - Sources/VoxOpsCore
+    dependencies:
+      - package: GRDB
+    settings:
+      SWIFT_VERSION: "5.9"
+    info:
+      path: Sources/VoxOpsCore/Info.plist
+      properties:
+        CFBundleIdentifier: com.voxops.core
+        CFBundleName: VoxOpsCore
+        CFBundleVersion: "1.0.0"
+        CFBundleShortVersionString: "1.0.0"
+
+  VoxOpsApp:
+    type: application
+    platform: macOS
+    sources:
+      - VoxOpsApp
+    dependencies:
+      - target: VoxOpsCore
+    settings:
+      SWIFT_VERSION: "5.9"
+      INFOPLIST_FILE: VoxOpsApp/Info.plist
+      CODE_SIGN_ENTITLEMENTS: VoxOpsApp/VoxOpsApp.entitlements
+      PRODUCT_BUNDLE_IDENTIFIER: com.voxops.app
+      CODE_SIGNING_ALLOWED: "NO"
+      CODE_SIGN_IDENTITY: ""
+    resources:
+      - Scripts/whisper-sidecar
+      - Scripts/mlx-whisper-sidecar
+
+  VoxOpsCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/VoxOpsCoreTests
+    dependencies:
+      - target: VoxOpsCore
+    settings:
+      SWIFT_VERSION: "5.9"
+      GENERATE_INFOPLIST_FILE: "YES"
+      CODE_SIGNING_ALLOWED: "NO"
+      CODE_SIGN_IDENTITY: ""

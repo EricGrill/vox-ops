@@ -1,4 +1,5 @@
 import SwiftUI
+import VoxOpsCore
 
 struct HUDOrbView: View {
     let state: VoxState
