@@ -65,7 +65,7 @@ public final class TranscriptionHistory: Sendable {
     public func recent(limit: Int = 5) throws -> [TranscriptionEntry] {
         try database.read { db in
             try TranscriptionEntry
-                .order(Column("created_at").desc)
+                .order(Column("id").desc)
                 .limit(limit)
                 .fetchAll(db)
         }
