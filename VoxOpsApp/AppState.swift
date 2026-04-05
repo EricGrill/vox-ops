@@ -254,9 +254,12 @@ final class AppState: ObservableObject {
             chatAgents = (try? await agentClientManager.allEnabledAgents()) ?? []
             let chatView = ChatView(agents: chatAgents, clientManager: agentClientManager)
             let hostingController = NSHostingController(rootView: chatView)
-            let window = ChatWindow(contentView: hostingController.view)
-            window.makeKeyAndOrderFront(nil)
-            self.chatWindow = window
+            if chatWindow == nil {
+                chatWindow = ChatWindow(contentView: hostingController.view)
+            } else {
+                chatWindow?.contentView = hostingController.view
+            }
+            chatWindow?.makeKeyAndOrderFront(nil)
         }
     }
 
