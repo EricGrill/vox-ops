@@ -8,6 +8,8 @@ final class AppState: ObservableObject {
     @Published var lastTranscript: String = ""
     @Published var selectedBackend: String = "whisper.cpp"
     @Published var isSettingsOpen = false
+    @Published var currentTrigger: HotkeyTrigger = .default
+    @Published var autoEnterEnabled: Bool = false
 
     private var database: Database?
     private var settingsStore: SettingsStore?
@@ -32,14 +34,45 @@ final class AppState: ObservableObject {
             self.audioManager = AudioManager()
             self.textInjector = TextInjector()
             self.rawFormatter = RawFormatter()
+            loadSettings()
             setupHotkey()
         } catch {
             voxState = .error("Setup failed: \(error.localizedDescription)")
         }
     }
 
+    private func loadSettings() {
+        guard let store = settingsStore else { return }
+        // Load trigger
+        if let json = try? store.getString("hotkey_trigger"),
+           let data = json.data(using: .utf8),
+           let trigger = try? JSONDecoder().decode(HotkeyTrigger.self, from: data) {
+            currentTrigger = trigger
+        }
+        // Load auto-enter
+        if let value = try? store.getString("auto_enter") {
+            autoEnterEnabled = value == "true"
+        }
+    }
+
+    func saveTrigger(_ trigger: HotkeyTrigger) {
+        guard let store = settingsStore else { return }
+        if let data = try? JSONEncoder().encode(trigger),
+           let json = String(data: data, encoding: .utf8) {
+            try? store.setString("hotkey_trigger", value: json)
+        }
+        currentTrigger = trigger
+        reloadHotkey()
+    }
+
+    func saveAutoEnter(_ enabled: Bool) {
+        guard let store = settingsStore else { return }
+        try? store.setString("auto_enter", value: enabled ? "true" : "false")
+        autoEnterEnabled = enabled
+    }
+
     private func setupHotkey() {
-        let hk = HotkeyManager(keyCode: 0x31, requiredModifiers: [.maskCommand, .maskAlternate]) // ⌥⌘Space
+        let hk = HotkeyManager(trigger: currentTrigger)
         hk.onKeyDown = { [weak self] in
             Task { @MainActor in self?.startListening() }
         }
@@ -52,6 +85,12 @@ final class AppState: ObservableObject {
         } catch {
             voxState = .error("Hotkey setup failed: \(error.localizedDescription)")
         }
+    }
+
+    private func reloadHotkey() {
+        hotkeyManager?.stop()
+        hotkeyManager = nil
+        setupHotkey()
     }
 
     private func startListening() {
@@ -73,8 +112,7 @@ final class AppState: ObservableObject {
                 let formatted = rawFormatter?.format(result.text) ?? result.text
                 lastTranscript = formatted
                 if let injector = textInjector {
-                    // Force clipboard strategy — AX reports false success
-                    let injResult = await injector.inject(text: formatted, strategy: .clipboard)
+                    let injResult = await injector.inject(text: formatted, strategy: .clipboard, autoEnter: autoEnterEnabled)
                     if injResult.success {
                         voxState = .success
                     } else {
