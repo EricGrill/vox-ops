@@ -195,7 +195,48 @@ VoxOps/
             └── 2026-04-05-voxops-v1-core-dictation.md  # V1 implementation plan
 ```
 
-## Quick Start
+## Install
+
+```bash
+brew tap EricGrill/tap
+brew install --cask voxops
+```
+
+Or download the latest `.zip` from [GitHub Releases](https://github.com/EricGrill/vox-ops/releases), extract, and drag to Applications.
+
+### Setup
+
+1. **Download a Whisper model** (~500MB, runs locally):
+   ```bash
+   mkdir -p ~/Library/Application\ Support/VoxOps/Models
+   curl -L -o ~/Library/Application\ Support/VoxOps/Models/ggml-small.bin \
+     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+   ```
+
+2. **Install whisper.cpp:**
+   ```bash
+   brew install whisper-cpp
+   ```
+
+3. **Grant permissions** — on first launch macOS will prompt for:
+   - **Accessibility** — System Settings → Privacy & Security → Accessibility → Add VoxOps
+   - **Microphone** — Prompted automatically
+
+4. **Launch** — VoxOps appears as a menu bar icon (no Dock icon).
+
+**Default hotkey:** Hold → speak → release → text appears at your cursor.
+
+### Agent Chat (Optional)
+
+Connect to [OpenClaw](https://github.com/AiCrew/openclaw) or Hermes agent servers:
+
+1. Open Settings → Agents → Add Server
+2. Local servers are auto-discovered on localhost
+3. OpenClaw tokens are auto-filled from `~/.openclaw/gateway-token`
+4. Set a chat hotkey in Settings → Agents → Chat Hotkey
+5. Press the chat hotkey to open the agent chat window
+
+## Development
 
 ### Prerequisites
 
@@ -204,44 +245,19 @@ VoxOps/
 - Xcode 15.0+
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
 
-### Build
+### Build from Source
 
 ```bash
-# Clone the repo
 git clone https://github.com/EricGrill/vox-ops.git
 cd vox-ops
 
-# Build core library (SPM)
-swift build
-
-# Run tests
-swift test
-
-# Generate Xcode project
-xcodegen generate
-
-# Build the app
+swift build        # Build core library
+swift test         # Run tests
+xcodegen generate  # Generate Xcode project
 xcodebuild -project VoxOps.xcodeproj -scheme VoxOpsApp -configuration Debug build
 ```
 
-### Download a Whisper Model
-
-```bash
-# Create model directory
-mkdir -p ~/Library/Application\ Support/VoxOps/Models
-
-# Download Whisper small model (~500MB)
-curl -L -o ~/Library/Application\ Support/VoxOps/Models/ggml-small.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
-```
-
-### Install whisper.cpp (for whisper.cpp backend)
-
-```bash
-brew install whisper-cpp
-```
-
-### Install MLX Whisper (for MLX backend)
+### MLX Whisper Backend (alternative)
 
 ```bash
 cd Scripts/mlx-whisper-sidecar
@@ -250,20 +266,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Grant Permissions
+### Releasing
 
-VoxOps requires two macOS permissions:
+```bash
+# Tag triggers GitHub Actions → builds → creates release
+git tag v0.2.0 && git push origin v0.2.0
 
-1. **Accessibility** — System Settings → Privacy & Security → Accessibility → Add VoxOps
-2. **Microphone** — Prompted on first launch
+# Or build locally
+./Scripts/build-release.sh 0.2.0
+```
 
-### Run
-
-Open `VoxOps.xcodeproj` in Xcode and run the `VoxOpsApp` scheme, or build and run from the command line. The app appears as a menu bar icon (no Dock icon).
-
-**Default hotkey:** Right Option (`⌥`)
-
-Hold → speak → release → text appears at your cursor.
+After release, update the SHA256 and version in the [Homebrew cask](https://github.com/EricGrill/homebrew-tap/blob/main/Casks/voxops.rb).
 
 ## Storage
 
@@ -284,28 +297,16 @@ Hold → speak → release → text appears at your cursor.
 ## Test Coverage
 
 ```
-27 tests across 9 suites — all passing
-
-Suite                    Tests   Coverage
-─────────────────────────────────────────
-AudioBuffer                 3   WAV export, duration, properties
-ClipboardInjector           2   AppleScript generation, escaping
-Database                    1   Migration verification
-PipelineIntegration         2   End-to-end mock, WAV round-trip
-RawFormatter                8   Capitalization, punctuation, spacing
-SettingsStore               3   Nil default, round-trip, overwrite
-SidecarProcess              3   Launch, stop, stdin/stdout I/O
-TranscriptResult            3   Creation, empty, JSON decode
-WhisperCppBackend           2   Identity, initial status
+86 tests across 20 suites — all passing
 ```
 
 ## Release Plan
 
 | Version | Scope | Status |
 |---------|-------|--------|
-| **V1** | Core dictation — hotkey, STT, raw mode, text injection, HUD, menu bar | ✅ Built |
+| **0.1.0** | Core dictation + agent chat integration (OpenClaw, Hermes) | ✅ Released |
 | **V2** | Prompt + command modes, intent router, app-aware profiles | Planned |
-| **V3** | Agent adapter integration, dispatch status, command schemas | Planned |
+| **V3** | Agent response routing to external channels | Planned |
 | **V4** | System mode, workflow registry, history panel, custom grammars | Planned |
 
 ## Tech Stack

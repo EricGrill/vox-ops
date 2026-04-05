@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Info.plist version
+        run: |
+          plutil -replace CFBundleShortVersionString -string "${{ steps.version.outputs.version }}" VoxOpsApp/Info.plist
+          plutil -replace CFBundleVersion -string "${{ steps.version.outputs.version }}" VoxOpsApp/Info.plist
+
+      - name: Build release
+        run: ./Scripts/build-release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Compute SHA256
+        id: sha
+        run: echo "sha256=$(shasum -a 256 build/VoxOps-${{ steps.version.outputs.version }}-macos-arm64.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: VoxOps ${{ steps.version.outputs.version }}
+          body: |
+            ## VoxOps ${{ steps.version.outputs.version }}
+
+            ### Install via Homebrew
+            ```bash
+            brew tap EricGrill/tap
+            brew install --cask voxops
+            ```
+
+            ### Manual Install
+            Download `VoxOps-${{ steps.version.outputs.version }}-macos-arm64.zip`, extract, and drag to Applications.
+
+            **SHA256:** `${{ steps.sha.outputs.sha256 }}`
+          files: build/VoxOps-${{ steps.version.outputs.version }}-macos-arm64.zip
+          draft: false
+          prerelease: false

@@ -42,9 +42,18 @@ targets:
       PRODUCT_BUNDLE_IDENTIFIER: com.voxops.app
       CODE_SIGNING_ALLOWED: "NO"
       CODE_SIGN_IDENTITY: ""
+    postCompileScripts:
+      - script: |
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/whisper-sidecar"
+          cp -R "${SRCROOT}/Scripts/whisper-sidecar/" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/whisper-sidecar/"
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/mlx-whisper-sidecar"
+          cp -R "${SRCROOT}/Scripts/mlx-whisper-sidecar/" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/mlx-whisper-sidecar/"
+        name: Copy Sidecar Scripts
     resources:
-      - Scripts/whisper-sidecar
-      - Scripts/mlx-whisper-sidecar
+      - path: Scripts/whisper-sidecar
+        buildPhase: resources
+      - path: Scripts/mlx-whisper-sidecar
+        buildPhase: resources
 
   VoxOpsCoreTests:
     type: bundle.unit-test

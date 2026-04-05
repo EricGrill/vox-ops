@@ -12,10 +12,6 @@ struct VoxOpsApp: App {
             Image(systemName: menuBarIcon)
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            SettingsView(appState: appState)
-        }
     }
 
     private var menuBarIcon: String {

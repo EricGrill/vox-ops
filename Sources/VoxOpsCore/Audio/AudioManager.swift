@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreAudio
 
 public final class AudioManager: @unchecked Sendable {
     private var audioEngine: AVAudioEngine?
@@ -41,6 +42,57 @@ public final class AudioManager: @unchecked Sendable {
         let data = recordedData
         recordedData = Data()
         return AudioBuffer(pcmData: data)
+    }
+
+    /// Switch audio input device. Pass empty string for system default.
+    public func switchInput(to deviceIdString: String) {
+        lock.lock()
+        let wasRecording = isRecording
+        lock.unlock()
+
+        if !deviceIdString.isEmpty, let deviceID = UInt32(deviceIdString) {
+            var id = deviceID
+            var propertyAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            let status = AudioObjectSetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &propertyAddress,
+                0, nil,
+                UInt32(MemoryLayout<AudioDeviceID>.size),
+                &id
+            )
+            if status != noErr {
+                print("[AudioManager] Failed to set input device \(deviceIdString): OSStatus \(status), falling back to system default")
+            }
+        }
+
+        if wasRecording {
+            lock.lock()
+            audioEngine?.inputNode.removeTap(onBus: 0)
+            audioEngine?.stop()
+            audioEngine = nil
+            lock.unlock()
+
+            let engine = AVAudioEngine()
+            let inputNode = engine.inputNode
+            let busFormat = inputNode.outputFormat(forBus: 0)
+            let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: busFormat) { [weak self] buffer, _ in
+                guard let self else { return }
+                if let converted = self.convert(buffer: buffer, to: recordingFormat) {
+                    self.lock.lock()
+                    self.recordedData.append(converted)
+                    self.lock.unlock()
+                }
+            }
+            try? engine.start()
+            lock.lock()
+            self.audioEngine = engine
+            lock.unlock()
+        }
     }
 
     private func convert(buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> Data? {

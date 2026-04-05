@@ -2,17 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>VoxOps needs microphone access for push-to-talk voice input.</string>
-    <key>CFBundleName</key>
-    <string>VoxOps</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.voxops.app</string>
-    <key>CFBundleVersion</key>
-    <string>1.0.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.voxops.app</string>
+	<key>CFBundleName</key>
+	<string>VoxOps</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.18</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.18</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>VoxOps needs microphone access for push-to-talk voice input.</string>
 </dict>
 </plist>

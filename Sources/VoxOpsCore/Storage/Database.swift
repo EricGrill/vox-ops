@@ -65,5 +65,14 @@ public final class Database: Sendable {
                 t.column("updatedAt", .datetime).notNull()
             }
         }
+        migrator.registerMigration("v2_transcriptions") { db in
+            try db.create(table: "transcriptions") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("text", .text).notNull()
+                t.column("duration_ms", .integer).notNull()
+                t.column("latency_ms", .integer).notNull()
+                t.column("created_at", .text).notNull().defaults(sql: "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+            }
+        }
     }
 }
