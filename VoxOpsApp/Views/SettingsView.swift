@@ -88,6 +88,13 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.tertiary)
             }
 
+            Section("History") {
+                Stepper("Show last \(appState.historyLimit) transcriptions", value: Binding(
+                    get: { appState.historyLimit },
+                    set: { appState.setHistoryLimit($0) }
+                ), in: 1...20)
+            }
+
             Section("STT Backend") {
                 Picker("Backend", selection: $selectedBackend) {
                     Text("whisper.cpp").tag("whisper.cpp")
@@ -101,8 +108,15 @@ struct SettingsView: View {
     private var audioTab: some View {
         Form {
             Section("Microphone") {
-                Text("Using system default microphone").foregroundStyle(.secondary)
-                Text("Microphone selection coming in a future update.").font(.caption).foregroundStyle(.tertiary)
+                Picker("Input Device", selection: Binding(
+                    get: { appState.selectedDeviceId },
+                    set: { appState.setAudioDevice($0) }
+                )) {
+                    Text("System Default").tag("")
+                    ForEach(appState.availableDevices, id: \.id) { device in
+                        Text(device.name).tag(device.id)
+                    }
+                }
             }
         }.padding()
     }
