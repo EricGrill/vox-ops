@@ -57,13 +57,16 @@ public final class AudioManager: @unchecked Sendable {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            AudioObjectSetPropertyData(
+            let status = AudioObjectSetPropertyData(
                 AudioObjectID(kAudioObjectSystemObject),
                 &propertyAddress,
                 0, nil,
                 UInt32(MemoryLayout<AudioDeviceID>.size),
                 &id
             )
+            if status != noErr {
+                print("[AudioManager] Failed to set input device \(deviceIdString): OSStatus \(status), falling back to system default")
+            }
         }
 
         if wasRecording {

@@ -4,19 +4,34 @@ import CoreAudio
 
 public final class AudioDeviceManager: @unchecked Sendable {
     public var onDevicesChanged: (() -> Void)?
+    private var listenerBlock: AudioObjectPropertyListenerBlock?
+    private var listenerAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
 
     public init() {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.onDevicesChanged?()
+        }
+        listenerBlock = block
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            DispatchQueue.main
-        ) { [weak self] _, _ in
-            self?.onDevicesChanged?()
+            &listenerAddress,
+            DispatchQueue.main,
+            block
+        )
+    }
+
+    deinit {
+        if let block = listenerBlock {
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &listenerAddress,
+                DispatchQueue.main,
+                block
+            )
         }
     }
 

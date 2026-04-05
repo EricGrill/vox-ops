@@ -189,13 +189,13 @@ final class AppState: ObservableObject {
                 guard let backend = activeBackend else { voxState = .error("No STT backend configured"); return }
                 let processStart = Date()
                 let result = try await backend.transcribe(audio: audio)
+                let latencyMs = Int(Date().timeIntervalSince(processStart) * 1000)
                 let formatted = formatterRegistry.active(name: activeFormatterName).format(result.text)
                 lastTranscript = formatted
                 if let injector = textInjector {
                     let injResult = await injector.inject(text: formatted, strategy: .clipboard, autoEnter: autoEnterEnabled)
                     if injResult.success {
                         voxState = .success
-                        let latencyMs = Int(Date().timeIntervalSince(processStart) * 1000)
                         let durationMs = Int(audio.duration * 1000)
                         try? transcriptionHistory?.record(text: formatted, durationMs: durationMs, latencyMs: latencyMs)
                         refreshStats()
