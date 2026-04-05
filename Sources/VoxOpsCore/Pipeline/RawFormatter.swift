@@ -1,6 +1,7 @@
 import Foundation
 
-public struct RawFormatter: Sendable {
+public struct RawFormatter: TextFormatter {
+    public var name: String { "Raw" }
     public init() {}
 
     public func format(_ text: String) -> String {
