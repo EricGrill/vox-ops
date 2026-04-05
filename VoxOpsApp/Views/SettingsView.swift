@@ -11,6 +11,7 @@ struct SettingsView: View {
         TabView {
             generalTab.tabItem { Label("General", systemImage: "gear") }
             audioTab.tabItem { Label("Audio", systemImage: "mic") }
+            AgentSettingsView(appState: appState).tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
         }
         .frame(width: 450, height: 400)
         .onAppear {
@@ -42,6 +43,10 @@ struct SettingsView: View {
                     let trigger = HotkeyTrigger(keyCode: keyCode, modifiers: modifierKeys.sorted())
                     if let error = trigger.validate() {
                         recordingError = error
+                        return true
+                    }
+                    if trigger == appState.chatTrigger {
+                        recordingError = "Cannot be the same as chat hotkey"
                         return true
                     }
                     isRecording = false
