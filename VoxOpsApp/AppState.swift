@@ -151,7 +151,7 @@ final class AppState: ObservableObject {
     }
 
     private func setupHotkey() {
-        let hk = HotkeyManager(trigger: currentTrigger)
+        let hk = HotkeyManager(voiceTrigger: currentTrigger)
         hk.onKeyDown = { [weak self] in
             Task { @MainActor in self?.startListening() }
         }

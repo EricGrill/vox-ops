@@ -6,8 +6,9 @@ import ApplicationServices
 public final class HotkeyManager: @unchecked Sendable {
     public typealias KeyHandler = @Sendable () -> Void
 
-    private let trigger: HotkeyTrigger
-    private var isActive = false
+    private let voiceTrigger: HotkeyTrigger
+    private var chatTrigger: HotkeyTrigger?
+    private var isVoiceActive = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var retainedSelf: Unmanaged<HotkeyManager>?
@@ -15,9 +16,11 @@ public final class HotkeyManager: @unchecked Sendable {
 
     public var onKeyDown: KeyHandler?
     public var onKeyUp: KeyHandler?
+    public var onChatToggle: KeyHandler?
 
-    public init(trigger: HotkeyTrigger = .default) {
-        self.trigger = trigger
+    public init(voiceTrigger: HotkeyTrigger = .default, chatTrigger: HotkeyTrigger? = nil) {
+        self.voiceTrigger = voiceTrigger
+        self.chatTrigger = chatTrigger
     }
 
     public func start() throws {
@@ -59,9 +62,9 @@ public final class HotkeyManager: @unchecked Sendable {
     public func stop() {
         lock.lock()
         // Capture handler if active — will invoke after lock is fully released
-        let wasActive = isActive
+        let wasActive = isVoiceActive
         let handler = wasActive ? onKeyUp : nil
-        isActive = false
+        isVoiceActive = false
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         eventTap = nil
@@ -76,45 +79,55 @@ public final class HotkeyManager: @unchecked Sendable {
     }
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        return handleKeyboardEvent(keyCode: CGKeyCode(trigger.keyCode), type: type, event: event)
-    }
-
-    // MARK: - Keyboard handling
-
-    private func handleKeyboardEvent(keyCode: CGKeyCode, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-        let requiredModifiers = trigger.cgEventFlags
+        let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
 
-        // If active, check if modifiers were released → trigger key up
-        if isActive && type == .flagsChanged {
-            let mask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-            let activeModifiers = event.flags.intersection(mask)
+        // If voice is active, check if voice modifiers were released → trigger key up
+        if isVoiceActive && type == .flagsChanged {
+            let requiredModifiers = voiceTrigger.cgEventFlags
+            let activeModifiers = event.flags.intersection(modifierMask)
             if !activeModifiers.contains(requiredModifiers) {
-                isActive = false
+                isVoiceActive = false
                 onKeyUp?()
             }
             return Unmanaged.passUnretained(event)
         }
 
-        guard eventKeyCode == keyCode else { return Unmanaged.passUnretained(event) }
+        // Filter auto-repeat events
+        let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+
+        // Check chat trigger keyDown first (single press toggles, consume event)
+        if let chat = chatTrigger, type == .keyDown, CGKeyCode(chat.keyCode) == eventKeyCode {
+            let requiredModifiers = chat.cgEventFlags
+            if requiredModifiers.isEmpty || event.flags.intersection(modifierMask).contains(requiredModifiers) {
+                if !isAutoRepeat {
+                    onChatToggle?()
+                }
+                return nil // consume
+            }
+        }
+
+        // Check voice trigger keyDown/keyUp (push-to-talk hold, consume event)
+        let voiceKeyCode = CGKeyCode(voiceTrigger.keyCode)
+        guard eventKeyCode == voiceKeyCode else { return Unmanaged.passUnretained(event) }
 
         switch type {
         case .keyDown:
+            let requiredModifiers = voiceTrigger.cgEventFlags
             if !requiredModifiers.isEmpty {
-                let mask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
-                let activeModifiers = event.flags.intersection(mask)
+                let activeModifiers = event.flags.intersection(modifierMask)
                 guard activeModifiers.contains(requiredModifiers) else {
                     return Unmanaged.passUnretained(event)
                 }
             }
-            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-                isActive = true
+            if !isAutoRepeat {
+                isVoiceActive = true
                 onKeyDown?()
             }
             return nil // consume
         case .keyUp:
-            guard isActive else { return Unmanaged.passUnretained(event) }
-            isActive = false
+            guard isVoiceActive else { return Unmanaged.passUnretained(event) }
+            isVoiceActive = false
             onKeyUp?()
             return nil // consume
         default:
