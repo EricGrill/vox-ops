@@ -11,13 +11,21 @@ final class AppState: ObservableObject {
     private var settingsWindow: NSWindow?
     @Published var currentTrigger: HotkeyTrigger = .default
     @Published var autoEnterEnabled: Bool = false
+    @Published var activeFormatterName: String = "Raw"
+    @Published var selectedDeviceId: String = ""
+    @Published var usageStats: UsageStats = UsageStats()
+    @Published var recentTranscriptions: [TranscriptionEntry] = []
+    @Published var availableDevices: [AudioDevice] = []
+    @Published var historyLimit: Int = 5
 
     private var database: Database?
     private var settingsStore: SettingsStore?
     private var audioManager: AudioManager?
     private var hotkeyManager: HotkeyManager?
     private var textInjector: TextInjector?
-    private var rawFormatter: RawFormatter?
+    private var transcriptionHistory: TranscriptionHistory?
+    private var audioDeviceManager: AudioDeviceManager?
+    private let formatterRegistry = FormatterRegistry()
     private var activeBackend: (any STTBackend)?
 
     init() {
@@ -32,10 +40,21 @@ final class AppState: ObservableObject {
             let db = try Database(directory: appSupport)
             self.database = db
             self.settingsStore = SettingsStore(database: db)
+            self.transcriptionHistory = TranscriptionHistory(database: db)
+            let deviceManager = AudioDeviceManager()
+            deviceManager.onDevicesChanged = { [weak self] in
+                self?.refreshDevices()
+                if let selectedId = self?.selectedDeviceId, !selectedId.isEmpty,
+                   !(self?.availableDevices.contains { $0.id == selectedId } ?? false) {
+                    self?.setAudioDevice("")
+                }
+            }
+            self.audioDeviceManager = deviceManager
             self.audioManager = AudioManager()
             self.textInjector = TextInjector()
-            self.rawFormatter = RawFormatter()
             loadSettings()
+            refreshStats()
+            refreshDevices()
             setupHotkey()
         } catch {
             voxState = .error("Setup failed: \(error.localizedDescription)")
@@ -53,6 +72,18 @@ final class AppState: ObservableObject {
         // Load auto-enter
         if let value = try? store.getString("auto_enter") {
             autoEnterEnabled = value == "true"
+        }
+        // Load formatter
+        if let name = try? store.getString("active_formatter") {
+            activeFormatterName = name
+        }
+        // Load audio device
+        if let id = try? store.getString("audio_device_id") {
+            selectedDeviceId = id
+        }
+        // Load history limit
+        if let limitStr = try? store.getString("history_limit"), let limit = Int(limitStr) {
+            historyLimit = limit
         }
     }
 
@@ -87,6 +118,36 @@ final class AppState: ObservableObject {
         guard let store = settingsStore else { return }
         try? store.setString("auto_enter", value: enabled ? "true" : "false")
         autoEnterEnabled = enabled
+    }
+
+    func setFormatter(_ name: String) {
+        guard let store = settingsStore else { return }
+        try? store.setString("active_formatter", value: name)
+        activeFormatterName = name
+    }
+
+    func setAudioDevice(_ id: String) {
+        guard let store = settingsStore else { return }
+        try? store.setString("audio_device_id", value: id)
+        selectedDeviceId = id
+        audioManager?.switchInput(to: id)
+    }
+
+    func setHistoryLimit(_ limit: Int) {
+        guard let store = settingsStore else { return }
+        try? store.setString("history_limit", value: String(limit))
+        historyLimit = limit
+        refreshStats()
+    }
+
+    func refreshStats() {
+        guard let history = transcriptionHistory else { return }
+        usageStats = (try? history.todayStats()) ?? UsageStats()
+        recentTranscriptions = (try? history.recent(limit: historyLimit)) ?? []
+    }
+
+    func refreshDevices() {
+        availableDevices = audioDeviceManager?.availableInputDevices() ?? []
     }
 
     private func setupHotkey() {
@@ -126,13 +187,18 @@ final class AppState: ObservableObject {
             do {
                 if activeBackend == nil { activeBackend = createBackend() }
                 guard let backend = activeBackend else { voxState = .error("No STT backend configured"); return }
+                let processStart = Date()
                 let result = try await backend.transcribe(audio: audio)
-                let formatted = rawFormatter?.format(result.text) ?? result.text
+                let formatted = formatterRegistry.active(name: activeFormatterName).format(result.text)
                 lastTranscript = formatted
                 if let injector = textInjector {
                     let injResult = await injector.inject(text: formatted, strategy: .clipboard, autoEnter: autoEnterEnabled)
                     if injResult.success {
                         voxState = .success
+                        let latencyMs = Int(Date().timeIntervalSince(processStart) * 1000)
+                        let durationMs = Int(audio.duration * 1000)
+                        try? transcriptionHistory?.record(text: formatted, durationMs: durationMs, latencyMs: latencyMs)
+                        refreshStats()
                     } else {
                         voxState = .error("Inject: \(injResult.error ?? "unknown")")
                     }
