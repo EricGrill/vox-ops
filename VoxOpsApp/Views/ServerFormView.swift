@@ -161,14 +161,25 @@ struct ServerFormView: View {
         } else {
             // TCP connect check for WebSocket ports
             return await withCheckedContinuation { continuation in
+                let lock = NSLock()
+                var hasResumed = false
+                func resumeOnce(_ value: Bool) {
+                    lock.lock()
+                    guard !hasResumed else { lock.unlock(); return }
+                    hasResumed = true
+                    lock.unlock()
+                    continuation.resume(returning: value)
+                }
                 let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: UInt16(port))!, using: .tcp)
                 connection.stateUpdateHandler = { state in
                     switch state {
                     case .ready:
                         connection.cancel()
-                        continuation.resume(returning: true)
-                    case .failed, .cancelled:
-                        continuation.resume(returning: false)
+                        resumeOnce(true)
+                    case .failed:
+                        resumeOnce(false)
+                    case .cancelled:
+                        resumeOnce(false)
                     default:
                         break
                     }
