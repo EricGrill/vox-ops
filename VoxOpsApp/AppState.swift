@@ -39,7 +39,7 @@ final class AppState: ObservableObject {
     }
 
     private func setupHotkey() {
-        let hk = HotkeyManager(keyCode: 0x3D) // Right Option
+        let hk = HotkeyManager(keyCode: 0x31, requiredModifiers: [.maskCommand, .maskAlternate]) // ⌥⌘Space
         hk.onKeyDown = { [weak self] in
             Task { @MainActor in self?.startListening() }
         }
@@ -73,8 +73,15 @@ final class AppState: ObservableObject {
                 let formatted = rawFormatter?.format(result.text) ?? result.text
                 lastTranscript = formatted
                 if let injector = textInjector {
-                    let injResult = await injector.inject(text: formatted)
-                    voxState = injResult.success ? .success : .error("Injection failed: \(injResult.error ?? "unknown")")
+                    // Force clipboard strategy — AX reports false success
+                    let injResult = await injector.inject(text: formatted, strategy: .clipboard)
+                    if injResult.success {
+                        voxState = .success
+                    } else {
+                        voxState = .error("Inject: \(injResult.error ?? "unknown")")
+                    }
+                } else {
+                    voxState = .error("No injector")
                 }
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 if case .success = voxState { voxState = .idle }
@@ -89,13 +96,17 @@ final class AppState: ObservableObject {
             .appendingPathComponent("VoxOps")
         switch selectedBackend {
         case "whisper.cpp":
-            let scriptPath = Bundle.main.path(forResource: "run", ofType: "sh", inDirectory: "whisper-sidecar")
-                ?? "Scripts/whisper-sidecar/run.sh"
+            guard let scriptPath = Bundle.main.path(forResource: "run", ofType: "sh", inDirectory: "whisper-sidecar") else {
+                voxState = .error("Missing whisper sidecar script in bundle")
+                return nil
+            }
             let modelPath = appSupport.appendingPathComponent("Models/ggml-small.bin").path
             return WhisperCppBackend(scriptPath: scriptPath, modelPath: modelPath)
         case "mlx-whisper":
-            let scriptPath = Bundle.main.path(forResource: "server", ofType: "py", inDirectory: "mlx-whisper-sidecar")
-                ?? "Scripts/mlx-whisper-sidecar/server.py"
+            guard let scriptPath = Bundle.main.path(forResource: "server", ofType: "py", inDirectory: "mlx-whisper-sidecar") else {
+                voxState = .error("Missing MLX sidecar script in bundle")
+                return nil
+            }
             return MLXWhisperBackend(scriptPath: scriptPath)
         default: return nil
         }

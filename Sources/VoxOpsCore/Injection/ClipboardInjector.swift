@@ -14,8 +14,22 @@ public final class ClipboardInjector: Sendable {
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        simulatePaste()
+
+        // Wait for clipboard to settle and target app to have focus
         try? await Task.sleep(nanoseconds: 100_000_000)
+
+        // Simulate ⌘V via CGEvent — post to cgAnnotatedSessionEventTap for cross-app delivery
+        let src = CGEventSource(stateID: .combinedSessionState)
+        if let keyDown = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true),
+           let keyUp = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false) {
+            keyDown.flags = .maskCommand
+            keyUp.flags = .maskCommand
+            keyDown.post(tap: .cgAnnotatedSessionEventTap)
+            keyUp.post(tap: .cgAnnotatedSessionEventTap)
+        }
+
+        // Wait for paste to complete before restoring clipboard
+        try? await Task.sleep(nanoseconds: 300_000_000)
 
         pasteboard.clearContents()
         for (typeRaw, data) in savedItems {
@@ -23,18 +37,6 @@ public final class ClipboardInjector: Sendable {
         }
 
         return InjectionResult(success: true, strategy: .clipboard)
-    }
-
-    private func simulatePaste() {
-        let vKeyCode: CGKeyCode = 0x09
-        if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: true) {
-            keyDown.flags = .maskCommand
-            keyDown.post(tap: .cghidEventTap)
-        }
-        if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: false) {
-            keyUp.flags = .maskCommand
-            keyUp.post(tap: .cghidEventTap)
-        }
     }
 
     public static func buildPasteScript(text: String) -> String {

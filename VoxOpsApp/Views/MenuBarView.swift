@@ -14,10 +14,7 @@ struct MenuBarView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Mode: Raw"); Spacer()
-                    Text("⌘1").font(.caption).foregroundStyle(.secondary)
-                }
+                Text("Mode: Raw")
                 Text("Backend: \(appState.selectedBackend)")
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -27,7 +24,14 @@ struct MenuBarView: View {
                     .padding(.horizontal, 12).padding(.vertical, 6)
             }
             Divider()
-            Button("Settings...") { appState.isSettingsOpen = true }
+            Button("Settings...") {
+                NSApp.activate(ignoringOtherApps: true)
+                if #available(macOS 14.0, *) {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                } else {
+                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                }
+            }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
             Button("Quit VoxOps") { NSApplication.shared.terminate(nil) }

@@ -10,13 +10,26 @@ WHISPER_MODEL="${WHISPER_MODEL:?WHISPER_MODEL environment variable required}"
 
 while IFS= read -r wav_path; do
     if [ -z "$wav_path" ]; then continue; fi
-    transcript=$("$WHISPER_CLI" --model "$WHISPER_MODEL" --file "$wav_path" --output-json --no-timestamps --language en 2>/dev/null)
-    text=$(echo "$transcript" | python3 -c "
+
+    # whisper-cli writes JSON to a file, not stdout — discard all stdout/stderr
+    output_base="/tmp/voxops-whisper-$$"
+    "$WHISPER_CLI" --model "$WHISPER_MODEL" --file "$wav_path" \
+        --output-json --no-timestamps --language en \
+        --output-file "$output_base" >/dev/null 2>/dev/null || true
+
+    json_file="${output_base}.json"
+    if [ -f "$json_file" ]; then
+        text=$(python3 -c "
 import sys, json
-data = json.load(sys.stdin)
+with open(sys.argv[1]) as f:
+    data = json.load(f)
 segments = data.get('transcription', [])
 text = ' '.join(s.get('text', '').strip() for s in segments).strip()
 print(json.dumps({'text': text, 'confidence': 0.9}))
-" 2>/dev/null || echo '{"text": "", "confidence": 0.0}')
-    echo "$text"
+" "$json_file" 2>/dev/null || echo '{"text": "", "confidence": 0.0}')
+        rm -f "$json_file"
+        echo "$text"
+    else
+        echo '{"text": "", "confidence": 0.0}'
+    fi
 done

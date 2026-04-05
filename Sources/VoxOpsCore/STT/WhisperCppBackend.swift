@@ -65,11 +65,14 @@ public final class WhisperCppBackend: STTBackend, @unchecked Sendable {
         let jsonLine = try await proc.readLine()
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
-        guard let jsonData = jsonLine.data(using: .utf8) else {
-            lock.lock(); _status = .error("Invalid response encoding"); lock.unlock()
+        guard let jsonData = jsonLine.data(using: .utf8), !jsonData.isEmpty else {
+            lock.lock(); _status = .error("Empty response from sidecar"); lock.unlock()
             throw SidecarError.encodingFailed
         }
-        let decoded = try JSONDecoder().decode(TranscriptJSON.self, from: jsonData)
+        guard let decoded = try? JSONDecoder().decode(TranscriptJSON.self, from: jsonData) else {
+            lock.lock(); _status = .error("Bad JSON: \(String(jsonLine.prefix(80)))"); lock.unlock()
+            throw SidecarError.encodingFailed
+        }
         lock.lock(); _status = .ready; lock.unlock()
 
         return TranscriptResult(text: decoded.text, confidence: decoded.confidence ?? 0.9, latencyMs: Int(elapsed * 1000), backend: id)

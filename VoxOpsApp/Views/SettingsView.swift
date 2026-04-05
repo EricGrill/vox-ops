@@ -16,7 +16,7 @@ struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("Hotkey") {
-                Text("Push-to-talk: Right Option (⌥)").foregroundStyle(.secondary)
+                Text("Push-to-talk: ⌥⌘Space").foregroundStyle(.secondary)
                 Text("Hotkey customization coming in a future update.").font(.caption).foregroundStyle(.tertiary)
             }
             Section("STT Backend") {
