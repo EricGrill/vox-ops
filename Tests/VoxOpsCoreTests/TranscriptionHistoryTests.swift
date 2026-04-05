@@ -36,4 +36,28 @@ struct TranscriptionHistoryTests {
         #expect(entries.count == 3)
         #expect(entries[0].text == "entry 10")
     }
+
+    @Test("todayStats returns count, duration, latency, and streak")
+    func todayStats() throws {
+        let db = try Database(inMemory: true)
+        let history = TranscriptionHistory(database: db)
+        try history.record(text: "a", durationMs: 1000, latencyMs: 200)
+        try history.record(text: "b", durationMs: 2000, latencyMs: 400)
+        let stats = try history.todayStats()
+        #expect(stats.count == 2)
+        #expect(stats.totalDurationMs == 3000)
+        #expect(stats.avgLatencyMs == 300)
+        #expect(stats.streakDays >= 1)
+    }
+
+    @Test("todayStats returns zeros when no transcriptions")
+    func todayStatsEmpty() throws {
+        let db = try Database(inMemory: true)
+        let history = TranscriptionHistory(database: db)
+        let stats = try history.todayStats()
+        #expect(stats.count == 0)
+        #expect(stats.totalDurationMs == 0)
+        #expect(stats.avgLatencyMs == 0)
+        #expect(stats.streakDays == 0)
+    }
 }
