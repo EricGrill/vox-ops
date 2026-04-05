@@ -5,7 +5,7 @@ import CoreGraphics
 public final class ClipboardInjector: Sendable {
     public init() {}
 
-    public func inject(text: String) async -> InjectionResult {
+    public func inject(text: String, autoEnter: Bool = false) async -> InjectionResult {
         let pasteboard = NSPasteboard.general
         let savedItems = pasteboard.pasteboardItems?.compactMap { item -> (String, Data)? in
             guard let type = item.types.first, let data = item.data(forType: type) else { return nil }
@@ -28,9 +28,21 @@ public final class ClipboardInjector: Sendable {
             keyUp.post(tap: .cgAnnotatedSessionEventTap)
         }
 
-        // Wait for paste to complete before restoring clipboard
+        // Wait for paste to complete
         try? await Task.sleep(nanoseconds: 300_000_000)
 
+        // Send Return keystroke if auto-enter is enabled
+        if autoEnter {
+            let returnKeyCode: CGKeyCode = 0x24 // kVK_Return
+            if let keyDown = CGEvent(keyboardEventSource: src, virtualKey: returnKeyCode, keyDown: true),
+               let keyUp = CGEvent(keyboardEventSource: src, virtualKey: returnKeyCode, keyDown: false) {
+                keyDown.post(tap: .cgAnnotatedSessionEventTap)
+                keyUp.post(tap: .cgAnnotatedSessionEventTap)
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        // Restore previous clipboard contents
         pasteboard.clearContents()
         for (typeRaw, data) in savedItems {
             pasteboard.setData(data, forType: NSPasteboard.PasteboardType(typeRaw))

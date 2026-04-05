@@ -27,16 +27,16 @@ public final class TextInjector: Sendable {
         self.clipboardInjector = ClipboardInjector()
     }
 
-    public func inject(text: String, strategy: InjectionStrategy = .auto) async -> InjectionResult {
+    public func inject(text: String, strategy: InjectionStrategy = .auto, autoEnter: Bool = false) async -> InjectionResult {
         switch strategy {
         case .accessibility:
             return await accessibilityInjector.inject(text: text)
         case .clipboard:
-            return await clipboardInjector.inject(text: text)
+            return await clipboardInjector.inject(text: text, autoEnter: autoEnter)
         case .auto:
             let axResult = await accessibilityInjector.inject(text: text)
             if axResult.success { return axResult }
-            return await clipboardInjector.inject(text: text)
+            return await clipboardInjector.inject(text: text, autoEnter: autoEnter)
         }
     }
 }
