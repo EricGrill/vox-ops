@@ -7,6 +7,7 @@ struct DiscoveredServer: Identifiable {
     let name: String
     let type: ServerType
     let url: String
+    let token: String?
 }
 
 struct ServerFormView: View {
@@ -94,6 +95,7 @@ struct ServerFormView: View {
                         name = server.name
                         serverType = server.type
                         url = server.url
+                        if let t = server.token { token = t }
                     } label: {
                         HStack {
                             Circle().fill(.green).frame(width: 6, height: 6)
@@ -127,6 +129,7 @@ struct ServerFormView: View {
         isScanning = true
         discovered = []
         Task {
+            let localToken = Self.readLocalOpenClawToken()
             var found: [DiscoveredServer] = []
             await withTaskGroup(of: DiscoveredServer?.self) { group in
                 for entry in Self.knownPorts {
@@ -136,7 +139,8 @@ struct ServerFormView: View {
                         return DiscoveredServer(
                             name: "\(entry.name) (:\(entry.port))",
                             type: entry.type,
-                            url: "\(entry.scheme)://127.0.0.1:\(entry.port)"
+                            url: "\(entry.scheme)://127.0.0.1:\(entry.port)",
+                            token: entry.type == .openclaw ? localToken : nil
                         )
                     }
                 }
@@ -147,6 +151,32 @@ struct ServerFormView: View {
             discovered = found.sorted { $0.url < $1.url }
             isScanning = false
         }
+    }
+
+    /// Reads the OpenClaw gateway token from ~/.openclaw/gateway-token or ~/.openclaw/.env
+    private static func readLocalOpenClawToken() -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        // Try gateway-token file first (plain text, single line)
+        let tokenFile = home.appendingPathComponent(".openclaw/gateway-token")
+        if let raw = try? String(contentsOf: tokenFile, encoding: .utf8) {
+            let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !token.isEmpty { return token }
+        }
+        // Fallback: parse OPENCLAW_GATEWAY_TOKEN from .env
+        let envFile = home.appendingPathComponent(".openclaw/.env")
+        if let contents = try? String(contentsOf: envFile, encoding: .utf8) {
+            for line in contents.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("OPENCLAW_GATEWAY_TOKEN=") {
+                    let value = String(trimmed.dropFirst("OPENCLAW_GATEWAY_TOKEN=".count))
+                    let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty && cleaned != "change-me-to-a-long-random-token" {
+                        return cleaned
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     private func probePort(host: String, port: Int, type: ServerType) async -> Bool {
