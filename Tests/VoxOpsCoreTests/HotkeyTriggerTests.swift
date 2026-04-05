@@ -8,15 +8,7 @@ import CoreGraphics
 struct HotkeyTriggerTests {
     @Test("keyboard trigger JSON round-trip")
     func keyboardRoundTrip() throws {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command, .option])
-        let data = try JSONEncoder().encode(trigger)
-        let decoded = try JSONDecoder().decode(HotkeyTrigger.self, from: data)
-        #expect(decoded == trigger)
-    }
-
-    @Test("mouse button trigger JSON round-trip")
-    func mouseRoundTrip() throws {
-        let trigger = HotkeyTrigger.mouseButton(buttonNumber: 4)
+        let trigger = HotkeyTrigger(keyCode: 0x31, modifiers: [.command, .option])
         let data = try JSONEncoder().encode(trigger)
         let decoded = try JSONDecoder().decode(HotkeyTrigger.self, from: data)
         #expect(decoded == trigger)
@@ -24,7 +16,7 @@ struct HotkeyTriggerTests {
 
     @Test("modifiers encode in sorted order")
     func sortedModifiers() throws {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.shift, .command, .option])
+        let trigger = HotkeyTrigger(keyCode: 0x31, modifiers: [.shift, .command, .option])
         let data = try JSONEncoder().encode(trigger)
         let json = String(data: data, encoding: .utf8)!
         let commandIdx = json.range(of: "command")!.lowerBound
@@ -37,24 +29,14 @@ struct HotkeyTriggerTests {
     @Test("default trigger is command-space")
     func defaultTrigger() {
         let trigger = HotkeyTrigger.default
-        if case .keyboard(let keyCode, let modifiers) = trigger {
-            #expect(keyCode == 0x31)
-            #expect(modifiers == [.command])
-        } else {
-            Issue.record("Expected keyboard trigger")
-        }
+        #expect(trigger.keyCode == 0x31)
+        #expect(trigger.modifiers == [.command])
     }
 
-    @Test("keyboard display string shows modifier symbols")
+    @Test("display string shows modifier symbols + key name")
     func keyboardDisplayString() {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command, .option])
+        let trigger = HotkeyTrigger(keyCode: 0x31, modifiers: [.command, .option])
         #expect(trigger.displayString == "⌥⌘Space")
-    }
-
-    @Test("mouse button display string")
-    func mouseDisplayString() {
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 3).displayString == "Mouse Button 3 (Middle)")
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 4).displayString == "Mouse Button 4 (Back)")
     }
 
     @Test("modifier key maps to correct CGEventFlags")
@@ -67,47 +49,37 @@ struct HotkeyTriggerTests {
 
     @Test("cgEventFlags combines all modifiers")
     func combinedFlags() {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command, .option])
+        let trigger = HotkeyTrigger(keyCode: 0x31, modifiers: [.command, .option])
         let flags = trigger.cgEventFlags
         #expect(flags.contains(.maskCommand))
         #expect(flags.contains(.maskAlternate))
     }
 
-    @Test("validation rejects keyboard with no modifiers")
+    @Test("validation rejects no modifiers")
     func rejectsNoModifiers() {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [])
+        let trigger = HotkeyTrigger(keyCode: 0x31, modifiers: [])
         #expect(trigger.validate() != nil)
     }
 
     @Test("validation rejects reserved shortcut cmd-Q")
     func rejectsReserved() {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x0C, modifiers: [.command]) // ⌘Q
+        let trigger = HotkeyTrigger(keyCode: 0x0C, modifiers: [.command]) // ⌘Q
         #expect(trigger.validate() != nil)
     }
 
-    @Test("validation accepts valid keyboard trigger")
+    @Test("validation accepts valid trigger")
     func acceptsValid() {
-        let trigger = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command, .option])
+        let trigger = HotkeyTrigger(keyCode: 0x31, modifiers: [.command, .option])
         #expect(trigger.validate() == nil)
     }
 
-    @Test("validation rejects mouse button 0, 1, and 2")
-    func rejectsLeftRightMiddle() {
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 0).validate() != nil)
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 1).validate() != nil)
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 2).validate() != nil)
-    }
-
-    @Test("validation accepts mouse button 3+")
-    func acceptsMouseSide() {
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 3).validate() == nil)
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 4).validate() == nil)
-        #expect(HotkeyTrigger.mouseButton(buttonNumber: 5).validate() == nil)
-    }
-
-    @Test("mouse button 5 display string shows Forward")
-    func mouseForwardDisplayString() {
-        let trigger = HotkeyTrigger.mouseButton(buttonNumber: 5)
-        #expect(trigger.displayString == "Mouse Button 5 (Forward)")
+    @Test("decoding old mouseButton JSON throws")
+    func legacyMouseButtonDecodeFails() throws {
+        // Old format: {"buttonNumber": 4}
+        let json = #"{"buttonNumber": 4}"#
+        let data = json.data(using: .utf8)!
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(HotkeyTrigger.self, from: data)
+        }
     }
 }

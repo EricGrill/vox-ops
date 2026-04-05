@@ -37,87 +37,38 @@ public enum ModifierKey: String, Codable, CaseIterable, Comparable, Sendable {
     }
 }
 
-public enum HotkeyTrigger: Codable, Equatable, Sendable {
-    case keyboard(keyCode: UInt16, modifiers: [ModifierKey])
-    case mouseButton(buttonNumber: Int)
+public struct HotkeyTrigger: Codable, Equatable, Sendable {
+    public let keyCode: UInt16
+    public let modifiers: [ModifierKey]
 
-    public static let `default` = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command])
+    public init(keyCode: UInt16, modifiers: [ModifierKey]) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers.sorted()
+    }
 
-    /// Combined CGEventFlags for all modifiers (keyboard triggers only, empty for mouse)
+    public static let `default` = HotkeyTrigger(keyCode: 0x31, modifiers: [.command])
+
+    /// Combined CGEventFlags for all modifiers
     public var cgEventFlags: CGEventFlags {
-        switch self {
-        case .keyboard(_, let modifiers):
-            var flags = CGEventFlags()
-            for mod in modifiers { flags.insert(mod.cgEventFlag) }
-            return flags
-        case .mouseButton:
-            return []
-        }
+        var flags = CGEventFlags()
+        for mod in modifiers { flags.insert(mod.cgEventFlag) }
+        return flags
     }
 
     /// Human-readable display string
     public var displayString: String {
-        switch self {
-        case .keyboard(let keyCode, let modifiers):
-            let modStr = modifiers.sorted(by: { $0.displaySortIndex < $1.displaySortIndex }).map(\.symbol).joined()
-            let keyName = Self.keyCodeName(keyCode)
-            return modStr + keyName
-        case .mouseButton(let num):
-            let label: String
-            switch num {
-            case 3: label = "Middle"
-            case 4: label = "Back"
-            case 5: label = "Forward"
-            default: label = "Button \(num)"
-            }
-            return "Mouse Button \(num) (\(label))"
-        }
+        let modStr = modifiers.sorted(by: { $0.displaySortIndex < $1.displaySortIndex }).map(\.symbol).joined()
+        let keyName = Self.keyCodeName(keyCode)
+        return modStr + keyName
     }
 
     /// Returns nil if valid, error string if invalid
     public func validate() -> String? {
-        switch self {
-        case .keyboard(let keyCode, let modifiers):
-            if modifiers.isEmpty { return "Keyboard shortcut requires at least one modifier" }
-            if isReserved(keyCode: keyCode, modifiers: Set(modifiers)) {
-                return "This shortcut is reserved by the system"
-            }
-            return nil
-        case .mouseButton(let num):
-            if num < 3 { return "Left, right, and middle mouse buttons cannot be used" }
-            return nil
+        if modifiers.isEmpty { return "Keyboard shortcut requires at least one modifier" }
+        if isReserved(keyCode: keyCode, modifiers: Set(modifiers)) {
+            return "This shortcut is reserved by the system"
         }
-    }
-
-    // MARK: - Codable with sorted modifiers
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .keyboard(let keyCode, let modifiers):
-            try container.encode(KeyboardPayload(keyCode: keyCode, modifiers: modifiers.sorted()))
-        case .mouseButton(let num):
-            try container.encode(MousePayload(buttonNumber: num))
-        }
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let kb = try? container.decode(KeyboardPayload.self) {
-            self = .keyboard(keyCode: kb.keyCode, modifiers: kb.modifiers.sorted())
-        } else {
-            let mouse = try container.decode(MousePayload.self)
-            self = .mouseButton(buttonNumber: mouse.buttonNumber)
-        }
-    }
-
-    private struct KeyboardPayload: Codable {
-        let keyCode: UInt16
-        let modifiers: [ModifierKey]
-    }
-
-    private struct MousePayload: Codable {
-        let buttonNumber: Int
+        return nil
     }
 
     // MARK: - Private

@@ -25,16 +25,9 @@ public final class HotkeyManager: @unchecked Sendable {
         defer { lock.unlock() }
         guard AXIsProcessTrusted() else { throw HotkeyError.accessibilityNotGranted }
 
-        let eventMask: Int
-        switch trigger {
-        case .keyboard:
-            eventMask = (1 << CGEventType.keyDown.rawValue)
+        let eventMask = (1 << CGEventType.keyDown.rawValue)
                       | (1 << CGEventType.keyUp.rawValue)
                       | (1 << CGEventType.flagsChanged.rawValue)
-        case .mouseButton:
-            eventMask = (1 << CGEventType.otherMouseDown.rawValue)
-                      | (1 << CGEventType.otherMouseUp.rawValue)
-        }
 
         let retained = Unmanaged.passRetained(self)
         self.retainedSelf = retained
@@ -83,12 +76,7 @@ public final class HotkeyManager: @unchecked Sendable {
     }
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        switch trigger {
-        case .keyboard(let keyCode, _):
-            return handleKeyboardEvent(keyCode: CGKeyCode(keyCode), type: type, event: event)
-        case .mouseButton(let buttonNumber):
-            return handleMouseEvent(buttonNumber: buttonNumber, type: type, event: event)
-        }
+        return handleKeyboardEvent(keyCode: CGKeyCode(trigger.keyCode), type: type, event: event)
     }
 
     // MARK: - Keyboard handling
@@ -125,27 +113,6 @@ public final class HotkeyManager: @unchecked Sendable {
             }
             return nil // consume
         case .keyUp:
-            guard isActive else { return Unmanaged.passUnretained(event) }
-            isActive = false
-            onKeyUp?()
-            return nil // consume
-        default:
-            return Unmanaged.passUnretained(event)
-        }
-    }
-
-    // MARK: - Mouse handling
-
-    private func handleMouseEvent(buttonNumber: Int, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        let eventButton = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-        guard eventButton == buttonNumber else { return Unmanaged.passUnretained(event) }
-
-        switch type {
-        case .otherMouseDown:
-            isActive = true
-            onKeyDown?()
-            return nil // consume
-        case .otherMouseUp:
             guard isActive else { return Unmanaged.passUnretained(event) }
             isActive = false
             onKeyUp?()

@@ -6,7 +6,6 @@ struct SettingsView: View {
     @State private var selectedBackend = "whisper.cpp"
     @State private var isRecording = false
     @State private var recordingError: String?
-    @State private var selectedMouseButton = 0 // 0 = None
 
     var body: some View {
         TabView {
@@ -16,9 +15,6 @@ struct SettingsView: View {
         .frame(width: 450, height: 400)
         .onAppear {
             selectedBackend = appState.selectedBackend
-            if case .mouseButton(let num) = appState.currentTrigger {
-                selectedMouseButton = num
-            }
         }
     }
 
@@ -43,14 +39,13 @@ struct SettingsView: View {
                     }
                     let modifierKeys = modifiers.toModifierKeys()
                     guard !modifierKeys.isEmpty else { return false } // Wait for modifier + key
-                    let trigger = HotkeyTrigger.keyboard(keyCode: keyCode, modifiers: modifierKeys.sorted())
+                    let trigger = HotkeyTrigger(keyCode: keyCode, modifiers: modifierKeys.sorted())
                     if let error = trigger.validate() {
                         recordingError = error
                         return true
                     }
                     isRecording = false
                     recordingError = nil
-                    selectedMouseButton = 0
                     appState.saveTrigger(trigger)
                     return true
                 }
@@ -59,21 +54,7 @@ struct SettingsView: View {
                     Text(error).foregroundStyle(.red).font(.caption)
                 }
 
-                // Mouse button picker
-                Picker("Or use mouse button", selection: $selectedMouseButton) {
-                    Text("None").tag(0)
-                    Text("Button 3 (Middle)").tag(3)
-                    Text("Button 4 (Back)").tag(4)
-                    Text("Button 5 (Forward)").tag(5)
-                }
-                .onChange(of: selectedMouseButton) { _, newValue in
-                    guard newValue > 0 else { return }
-                    let trigger = HotkeyTrigger.mouseButton(buttonNumber: newValue)
-                    appState.saveTrigger(trigger)
-                }
-
                 Button("Reset to Default") {
-                    selectedMouseButton = 0
                     appState.saveTrigger(.default)
                 }
                 .font(.caption)
