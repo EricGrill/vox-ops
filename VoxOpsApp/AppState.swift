@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
     @Published var lastTranscript: String = ""
     @Published var selectedBackend: String = "whisper.cpp"
     @Published var isSettingsOpen = false
+    private var settingsWindow: NSWindow?
     @Published var currentTrigger: HotkeyTrigger = .default
     @Published var autoEnterEnabled: Bool = false
 
@@ -63,6 +64,23 @@ final class AppState: ObservableObject {
         }
         currentTrigger = trigger
         reloadHotkey()
+    }
+
+    func openSettings() {
+        if let window = settingsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let settingsView = SettingsView(appState: self)
+        let hostingController = NSHostingController(rootView: settingsView)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "VoxOps Settings"
+        window.styleMask = [.titled, .closable]
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.settingsWindow = window
     }
 
     func saveAutoEnter(_ enabled: Bool) {

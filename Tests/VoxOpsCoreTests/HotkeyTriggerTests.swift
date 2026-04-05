@@ -34,12 +34,12 @@ struct HotkeyTriggerTests {
         #expect(optionIdx < shiftIdx)
     }
 
-    @Test("default trigger is option-command-space")
+    @Test("default trigger is command-space")
     func defaultTrigger() {
         let trigger = HotkeyTrigger.default
         if case .keyboard(let keyCode, let modifiers) = trigger {
             #expect(keyCode == 0x31)
-            #expect(modifiers == [.command, .option])
+            #expect(modifiers == [.command])
         } else {
             Issue.record("Expected keyboard trigger")
         }

@@ -41,7 +41,7 @@ public enum HotkeyTrigger: Codable, Equatable, Sendable {
     case keyboard(keyCode: UInt16, modifiers: [ModifierKey])
     case mouseButton(buttonNumber: Int)
 
-    public static let `default` = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command, .option])
+    public static let `default` = HotkeyTrigger.keyboard(keyCode: 0x31, modifiers: [.command])
 
     /// Combined CGEventFlags for all modifiers (keyboard triggers only, empty for mouse)
     public var cgEventFlags: CGEventFlags {
@@ -150,7 +150,7 @@ public enum HotkeyTrigger: Codable, Equatable, Sendable {
             (0x0C, [.command]),            // ⌘Q
             (0x0D, [.command]),            // ⌘W
             (0x30, [.command]),            // ⌘Tab
-            (0x31, [.command]),            // ⌘Space (Spotlight)
+
             (0x04, [.command]),            // ⌘H (Hide)
             (0x2E, [.command]),            // ⌘M (Minimize)
         ]

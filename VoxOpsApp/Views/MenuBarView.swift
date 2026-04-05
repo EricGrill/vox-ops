@@ -25,17 +25,16 @@ struct MenuBarView: View {
             }
             Divider()
             Button("Settings...") {
-                NSApp.activate(ignoringOtherApps: true)
-                if #available(macOS 14.0, *) {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                } else {
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                }
+                appState.openSettings()
             }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
             Button("Quit VoxOps") { NSApplication.shared.terminate(nil) }
                 .padding(.horizontal, 12).padding(.vertical, 6)
+            Divider()
+            Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .padding(.horizontal, 12).padding(.bottom, 6)
         }
         .frame(width: 240)
     }
