@@ -1,3 +1,4 @@
+// Sources/VoxOpsCore/Hotkey/HotkeyManager.swift
 import Foundation
 import CoreGraphics
 import ApplicationServices
@@ -5,19 +6,18 @@ import ApplicationServices
 public final class HotkeyManager: @unchecked Sendable {
     public typealias KeyHandler = @Sendable () -> Void
 
-    private let keyCode: CGKeyCode
-    private let requiredModifiers: CGEventFlags
+    private let trigger: HotkeyTrigger
     private var isActive = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var retainedSelf: Unmanaged<HotkeyManager>?
     private let lock = NSLock()
 
     public var onKeyDown: KeyHandler?
     public var onKeyUp: KeyHandler?
 
-    public init(keyCode: CGKeyCode = 0x31, requiredModifiers: CGEventFlags = []) {
-        self.keyCode = keyCode
-        self.requiredModifiers = requiredModifiers
+    public init(trigger: HotkeyTrigger = .default) {
+        self.trigger = trigger
     }
 
     public func start() throws {
@@ -25,8 +25,19 @@ public final class HotkeyManager: @unchecked Sendable {
         defer { lock.unlock() }
         guard AXIsProcessTrusted() else { throw HotkeyError.accessibilityNotGranted }
 
-        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        let eventMask: Int
+        switch trigger {
+        case .keyboard:
+            eventMask = (1 << CGEventType.keyDown.rawValue)
+                      | (1 << CGEventType.keyUp.rawValue)
+                      | (1 << CGEventType.flagsChanged.rawValue)
+        case .mouseButton:
+            eventMask = (1 << CGEventType.otherMouseDown.rawValue)
+                      | (1 << CGEventType.otherMouseUp.rawValue)
+        }
+
+        let retained = Unmanaged.passRetained(self)
+        self.retainedSelf = retained
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -38,8 +49,12 @@ public final class HotkeyManager: @unchecked Sendable {
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
                 return manager.handleEvent(proxy: proxy, type: type, event: event)
             },
-            userInfo: selfPtr
-        ) else { throw HotkeyError.cannotCreateEventTap }
+            userInfo: retained.toOpaque()
+        ) else {
+            retained.release()
+            self.retainedSelf = nil
+            throw HotkeyError.cannotCreateEventTap
+        }
 
         self.eventTap = tap
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
@@ -50,17 +65,39 @@ public final class HotkeyManager: @unchecked Sendable {
 
     public func stop() {
         lock.lock()
-        defer { lock.unlock() }
+        // Capture handler if active — will invoke after lock is fully released
+        let wasActive = isActive
+        let handler = wasActive ? onKeyUp : nil
+        isActive = false
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         eventTap = nil
         runLoopSource = nil
+        // Release the retained self pointer
+        let retained = retainedSelf
+        retainedSelf = nil
+        lock.unlock()
+        retained?.release()
+        // Fire onKeyUp after lock is released to prevent deadlock if handler calls back into us
+        if wasActive { handler?() }
     }
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        switch trigger {
+        case .keyboard(let keyCode, _):
+            return handleKeyboardEvent(keyCode: CGKeyCode(keyCode), type: type, event: event)
+        case .mouseButton(let buttonNumber):
+            return handleMouseEvent(buttonNumber: buttonNumber, type: type, event: event)
+        }
+    }
 
-        // If active (listening), check if modifiers were released → trigger key up
+    // MARK: - Keyboard handling
+
+    private func handleKeyboardEvent(keyCode: CGKeyCode, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        let requiredModifiers = trigger.cgEventFlags
+
+        // If active, check if modifiers were released → trigger key up
         if isActive && type == .flagsChanged {
             let mask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
             let activeModifiers = event.flags.intersection(mask)
@@ -75,7 +112,6 @@ public final class HotkeyManager: @unchecked Sendable {
 
         switch type {
         case .keyDown:
-            // Check required modifiers on key down
             if !requiredModifiers.isEmpty {
                 let mask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
                 let activeModifiers = event.flags.intersection(mask)
@@ -89,7 +125,27 @@ public final class HotkeyManager: @unchecked Sendable {
             }
             return nil // consume
         case .keyUp:
-            // Accept any Space keyUp while active, regardless of modifiers
+            guard isActive else { return Unmanaged.passUnretained(event) }
+            isActive = false
+            onKeyUp?()
+            return nil // consume
+        default:
+            return Unmanaged.passUnretained(event)
+        }
+    }
+
+    // MARK: - Mouse handling
+
+    private func handleMouseEvent(buttonNumber: Int, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        let eventButton = Int(event.getIntegerValueField(.mouseEventButtonNumber))
+        guard eventButton == buttonNumber else { return Unmanaged.passUnretained(event) }
+
+        switch type {
+        case .otherMouseDown:
+            isActive = true
+            onKeyDown?()
+            return nil // consume
+        case .otherMouseUp:
             guard isActive else { return Unmanaged.passUnretained(event) }
             isActive = false
             onKeyUp?()
