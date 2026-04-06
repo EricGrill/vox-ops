@@ -8,6 +8,7 @@ public final class HotkeyManager: @unchecked Sendable {
 
     private let voiceTrigger: HotkeyTrigger
     private var chatTrigger: HotkeyTrigger?
+    private var toggleTrigger: HotkeyTrigger?
     private var isVoiceActive = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -17,10 +18,16 @@ public final class HotkeyManager: @unchecked Sendable {
     public var onKeyDown: KeyHandler?
     public var onKeyUp: KeyHandler?
     public var onChatToggle: KeyHandler?
+    public var onToggleListening: KeyHandler?
 
-    public init(voiceTrigger: HotkeyTrigger = .default, chatTrigger: HotkeyTrigger? = nil) {
+    public init(
+        voiceTrigger: HotkeyTrigger = .default,
+        chatTrigger: HotkeyTrigger? = nil,
+        toggleTrigger: HotkeyTrigger? = nil
+    ) {
         self.voiceTrigger = voiceTrigger
         self.chatTrigger = chatTrigger
+        self.toggleTrigger = toggleTrigger
     }
 
     public func start() throws {
@@ -61,7 +68,6 @@ public final class HotkeyManager: @unchecked Sendable {
 
     public func stop() {
         lock.lock()
-        // Capture handler if active — will invoke after lock is fully released
         let wasActive = isVoiceActive
         let handler = wasActive ? onKeyUp : nil
         isVoiceActive = false
@@ -69,23 +75,22 @@ public final class HotkeyManager: @unchecked Sendable {
         if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         eventTap = nil
         runLoopSource = nil
-        // Release the retained self pointer
         let retained = retainedSelf
         retainedSelf = nil
         lock.unlock()
         retained?.release()
-        // Fire onKeyUp after lock is released to prevent deadlock if handler calls back into us
         if wasActive { handler?() }
     }
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
+        let activeModifiers = event.flags.intersection(modifierMask)
+        let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
 
-        // If voice is active, check if voice modifiers were released → trigger key up
+        // If voice is active via PTT, check if voice modifiers were released
         if isVoiceActive && type == .flagsChanged {
             let requiredModifiers = voiceTrigger.cgEventFlags
-            let activeModifiers = event.flags.intersection(modifierMask)
             if !activeModifiers.contains(requiredModifiers) {
                 isVoiceActive = false
                 onKeyUp?()
@@ -93,30 +98,43 @@ public final class HotkeyManager: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
 
-        // Filter auto-repeat events
-        let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-
-        // Check chat trigger keyDown first (single press toggles, consume event)
-        if let chat = chatTrigger, type == .keyDown, CGKeyCode(chat.keyCode) == eventKeyCode {
-            let requiredModifiers = chat.cgEventFlags
-            if requiredModifiers.isEmpty || event.flags.intersection(modifierMask).contains(requiredModifiers) {
+        // Toggle-to-talk: single press starts/stops listening
+        if let toggle = toggleTrigger, type == .keyDown, CGKeyCode(toggle.keyCode) == eventKeyCode {
+            let required = toggle.cgEventFlags
+            if required.isEmpty || activeModifiers.contains(required) {
                 if !isAutoRepeat {
-                    onChatToggle?()
+                    if isVoiceActive {
+                        isVoiceActive = false
+                        onKeyUp?()
+                    } else {
+                        isVoiceActive = true
+                        onToggleListening?()
+                    }
                 }
-                return nil // consume
+                return nil
             }
         }
 
-        // Check voice trigger keyDown/keyUp (push-to-talk hold, consume event)
+        // Chat trigger: single press toggles chat window
+        if let chat = chatTrigger, type == .keyDown, CGKeyCode(chat.keyCode) == eventKeyCode {
+            let required = chat.cgEventFlags
+            if required.isEmpty || activeModifiers.contains(required) {
+                if !isAutoRepeat {
+                    onChatToggle?()
+                }
+                return nil
+            }
+        }
+
+        // Voice trigger: push-to-talk hold
         let voiceKeyCode = CGKeyCode(voiceTrigger.keyCode)
         guard eventKeyCode == voiceKeyCode else { return Unmanaged.passUnretained(event) }
 
         switch type {
         case .keyDown:
-            let requiredModifiers = voiceTrigger.cgEventFlags
-            if !requiredModifiers.isEmpty {
-                let activeModifiers = event.flags.intersection(modifierMask)
-                guard activeModifiers.contains(requiredModifiers) else {
+            let required = voiceTrigger.cgEventFlags
+            if !required.isEmpty {
+                guard activeModifiers.contains(required) else {
                     return Unmanaged.passUnretained(event)
                 }
             }
@@ -124,12 +142,12 @@ public final class HotkeyManager: @unchecked Sendable {
                 isVoiceActive = true
                 onKeyDown?()
             }
-            return nil // consume
+            return nil
         case .keyUp:
             guard isVoiceActive else { return Unmanaged.passUnretained(event) }
             isVoiceActive = false
             onKeyUp?()
-            return nil // consume
+            return nil
         default:
             return Unmanaged.passUnretained(event)
         }

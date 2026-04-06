@@ -7,14 +7,21 @@ set -euo pipefail
 
 WHISPER_CLI="${WHISPER_CLI:-whisper-cli}"
 WHISPER_MODEL="${WHISPER_MODEL:?WHISPER_MODEL environment variable required}"
+WHISPER_PROMPT="${WHISPER_PROMPT:-}"
+WHISPER_LANG="${WHISPER_LANG:-en}"
 
 while IFS= read -r wav_path; do
     if [ -z "$wav_path" ]; then continue; fi
 
     # whisper-cli writes JSON to a file, not stdout — discard all stdout/stderr
     output_base="/tmp/voxops-whisper-$$"
+    prompt_args=()
+    if [ -n "$WHISPER_PROMPT" ]; then
+        prompt_args=(--prompt "$WHISPER_PROMPT")
+    fi
     "$WHISPER_CLI" --model "$WHISPER_MODEL" --file "$wav_path" \
-        --output-json --no-timestamps --language en \
+        --output-json --no-timestamps --language "$WHISPER_LANG" \
+        "${prompt_args[@]}" \
         --output-file "$output_base" >/dev/null 2>/dev/null || true
 
     json_file="${output_base}.json"

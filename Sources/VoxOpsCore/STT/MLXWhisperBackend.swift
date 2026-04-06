@@ -5,6 +5,8 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
     private let scriptPath: String
     private let pythonPath: String
     private let modelName: String
+    private let initialPrompt: String?
+    private let language: String
     private var sidecar: SidecarProcess?
     private var socketPath: String?
     private let lock = NSLock()
@@ -14,10 +16,12 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }; return _status
     }
 
-    public init(scriptPath: String, pythonPath: String = "/usr/bin/python3", modelName: String = "mlx-community/whisper-small-mlx") {
+    public init(scriptPath: String, pythonPath: String = "/usr/bin/python3", modelName: String = "mlx-community/whisper-small-mlx", initialPrompt: String? = nil, language: String = "en") {
         self.scriptPath = scriptPath
         self.pythonPath = pythonPath
         self.modelName = modelName
+        self.initialPrompt = initialPrompt
+        self.language = language
     }
 
     public func start() async throws {
@@ -26,10 +30,14 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
         let sockPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("voxops-mlx-\(ProcessInfo.processInfo.processIdentifier).sock").path
         self.socketPath = sockPath
+        var env = ["VOXOPS_SOCKET": sockPath, "WHISPER_MODEL": modelName, "WHISPER_LANG": language]
+        if let prompt = initialPrompt, !prompt.isEmpty {
+            env["WHISPER_PROMPT"] = prompt
+        }
         let proc = SidecarProcess(
             executablePath: pythonPath,
             arguments: [scriptPath],
-            environment: ["VOXOPS_SOCKET": sockPath, "WHISPER_MODEL": modelName]
+            environment: env
         )
         try proc.start()
         sidecar = proc

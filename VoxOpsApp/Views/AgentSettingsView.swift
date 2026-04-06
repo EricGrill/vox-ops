@@ -8,40 +8,92 @@ struct AgentSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Servers") {
+            Section {
                 if appState.agentServers.isEmpty {
-                    Text("No servers configured").foregroundStyle(.secondary)
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 6) {
+                            Image(systemName: "server.rack")
+                                .font(.title2).foregroundStyle(.tertiary)
+                            Text("No servers configured")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 12)
+                        Spacer()
+                    }
                 } else {
                     ForEach(appState.agentServers) { server in
-                        HStack {
-                            Circle()
-                                .fill(server.enabled ? .green : .gray)
-                                .frame(width: 8, height: 8)
-                            VStack(alignment: .leading) {
-                                Text(server.name).font(.body)
-                                Text("\(server.type.rawValue) — \(server.url)")
+                        HStack(spacing: 10) {
+                            Image(systemName: server.type == .openclaw ? "bolt.circle.fill" : "globe")
+                                .font(.title3)
+                                .foregroundStyle(server.enabled ? .green : .gray)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(server.name)
+                                    .fontWeight(.medium)
+                                Text(server.url)
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button { editingServer = server } label: {
-                                Image(systemName: "pencil")
-                            }.buttonStyle(.plain)
-                            Button { appState.removeServer(server.id) } label: {
-                                Image(systemName: "xmark")
-                            }.buttonStyle(.plain)
+                            Button {
+                                editingServer = server
+                            } label: {
+                                Image(systemName: "pencil.circle")
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit server")
+
+                            Button {
+                                appState.removeServer(server.id)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove server")
                         }
+                        .padding(.vertical, 2)
                     }
                 }
-                Button("Add Server...") { showingAddServer = true }
+
+                Button {
+                    showingAddServer = true
+                } label: {
+                    Label("Add Server", systemImage: "plus.circle")
+                }
+                .controlSize(.small)
+            } header: {
+                Text("Agent Servers")
             }
 
-            Section("Chat Hotkey") {
-                Text("Current: \(appState.chatTrigger?.displayString ?? "Not set")")
-                    .font(.headline)
-                ChatHotkeyRecorder(appState: appState)
+            Section {
+                LabeledContent("Chat Hotkey") {
+                    HStack(spacing: 8) {
+                        if let trigger = appState.chatTrigger {
+                            Text(trigger.displayString)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary)
+                                .cornerRadius(6)
+                        } else {
+                            Text("Not set")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ChatHotkeyRecorder(appState: appState)
+                    }
+                }
+            } header: {
+                Text("Chat Window")
+            } footer: {
+                Text("Press the chat hotkey to toggle the agent chat window.")
             }
         }
-        .padding()
+        .formStyle(.grouped)
         .sheet(isPresented: $showingAddServer) {
             ServerFormView { server in appState.addServer(server) }
         }
@@ -57,35 +109,43 @@ private struct ChatHotkeyRecorder: View {
     @State private var recordingError: String?
 
     var body: some View {
-        Button(isRecording ? "Press your shortcut..." : "Record Chat Hotkey...") {
-            isRecording = true
-            recordingError = nil
-        }
-        .disabled(isRecording)
-        .onKeyDown(isActive: $isRecording) { keyCode, modifiers in
-            if keyCode == 0x35 {
+        VStack(alignment: .leading, spacing: 4) {
+            Button(isRecording ? "Press shortcut..." : "Change") {
+                isRecording = true
+                recordingError = nil
+            }
+            .controlSize(.small)
+            .disabled(isRecording)
+            .onKeyDown(isActive: $isRecording) { keyCode, modifiers in
+                if keyCode == 0x35 {
+                    isRecording = false
+                    recordingError = nil
+                    return true
+                }
+                let modifierKeys = modifiers.toModifierKeys()
+                guard !modifierKeys.isEmpty else { return false }
+                let trigger = HotkeyTrigger(keyCode: keyCode, modifiers: modifierKeys)
+                if let error = trigger.validate() {
+                    recordingError = error
+                    return true
+                }
+                if trigger == appState.currentTrigger {
+                    recordingError = "Conflicts with voice hotkey"
+                    return true
+                }
+                if trigger == appState.toggleTrigger {
+                    recordingError = "Conflicts with toggle-to-talk hotkey"
+                    return true
+                }
                 isRecording = false
                 recordingError = nil
+                appState.saveChatTrigger(trigger)
                 return true
             }
-            let modifierKeys = modifiers.toModifierKeys()
-            guard !modifierKeys.isEmpty else { return false }
-            let trigger = HotkeyTrigger(keyCode: keyCode, modifiers: modifierKeys)
-            if let error = trigger.validate() {
-                recordingError = error
-                return true
+
+            if let error = recordingError {
+                Text(error).foregroundStyle(.red).font(.caption)
             }
-            if trigger == appState.currentTrigger {
-                recordingError = "Cannot be the same as voice hotkey"
-                return true
-            }
-            isRecording = false
-            recordingError = nil
-            appState.saveChatTrigger(trigger)
-            return true
-        }
-        if let error = recordingError {
-            Text(error).foregroundStyle(.red).font(.caption)
         }
     }
 }
