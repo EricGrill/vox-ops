@@ -16,7 +16,7 @@ struct SettingsView: View {
             vocabularyTab.tabItem { Label("Vocabulary", systemImage: "text.book.closed") }
             AgentSettingsView(appState: appState).tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 480, height: 620)
         .onAppear {
             selectedBackend = appState.selectedBackend
         }
