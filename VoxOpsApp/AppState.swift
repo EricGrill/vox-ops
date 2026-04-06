@@ -472,6 +472,8 @@ final class AppState: ObservableObject {
             }
             let prompt = whisperPrompt.isEmpty ? nil : whisperPrompt
             return MLXWhisperBackend(scriptPath: scriptPath, initialPrompt: prompt, language: sttLanguage)
+        case "apple":
+            return AppleSpeechBackend(language: sttLanguage)
         default: return nil
         }
     }

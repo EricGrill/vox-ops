@@ -16,7 +16,7 @@ struct SettingsView: View {
             vocabularyTab.tabItem { Label("Vocabulary", systemImage: "text.book.closed") }
             AgentSettingsView(appState: appState).tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 480, height: 620)
         .onAppear {
             selectedBackend = appState.selectedBackend
         }
@@ -164,6 +164,7 @@ struct SettingsView: View {
                 Picker("Speech-to-Text Engine", selection: $selectedBackend) {
                     Text("whisper.cpp").tag("whisper.cpp")
                     Text("MLX Whisper").tag("mlx-whisper")
+                    Text("Apple Speech").tag("apple")
                 }
                 .onChange(of: selectedBackend) { _, newValue in appState.selectedBackend = newValue }
 
@@ -363,11 +364,13 @@ private struct CustomWordAddRow: View {
     var body: some View {
         HStack(spacing: 8) {
             TextField("Heard as...", text: $pattern)
+                .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: .infinity)
             Image(systemName: "arrow.right")
                 .foregroundStyle(.tertiary)
                 .font(.caption)
             TextField("Replace with...", text: $replacement)
+                .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: .infinity)
             Button {
                 let p = pattern.trimmingCharacters(in: .whitespaces)
