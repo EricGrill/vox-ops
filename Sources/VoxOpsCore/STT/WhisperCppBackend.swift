@@ -4,6 +4,8 @@ public final class WhisperCppBackend: STTBackend, @unchecked Sendable {
     public let id = "whisper.cpp"
     private let scriptPath: String
     private let modelPath: String
+    private let initialPrompt: String?
+    private let language: String
     private var sidecar: SidecarProcess?
     private let lock = NSLock()
     private var _status: BackendStatus = .idle
@@ -14,19 +16,25 @@ public final class WhisperCppBackend: STTBackend, @unchecked Sendable {
         return _status
     }
 
-    public init(scriptPath: String, modelPath: String) {
+    public init(scriptPath: String, modelPath: String, initialPrompt: String? = nil, language: String = "en") {
         self.scriptPath = scriptPath
         self.modelPath = modelPath
+        self.initialPrompt = initialPrompt
+        self.language = language
     }
 
     public func start() async throws {
         lock.lock()
         defer { lock.unlock() }
         _status = .starting
+        var env = ["WHISPER_MODEL": modelPath, "WHISPER_LANG": language, "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]
+        if let prompt = initialPrompt, !prompt.isEmpty {
+            env["WHISPER_PROMPT"] = prompt
+        }
         let proc = SidecarProcess(
             executablePath: "/bin/bash",
             arguments: [scriptPath],
-            environment: ["WHISPER_MODEL": modelPath, "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]
+            environment: env
         )
         try proc.start()
         sidecar = proc

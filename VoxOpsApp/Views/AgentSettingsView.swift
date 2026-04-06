@@ -133,6 +133,10 @@ private struct ChatHotkeyRecorder: View {
                     recordingError = "Conflicts with voice hotkey"
                     return true
                 }
+                if trigger == appState.toggleTrigger {
+                    recordingError = "Conflicts with toggle-to-talk hotkey"
+                    return true
+                }
                 isRecording = false
                 recordingError = nil
                 appState.saveChatTrigger(trigger)

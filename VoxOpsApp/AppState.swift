@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 import SwiftUI
 import VoxOpsCore
 
@@ -17,10 +18,18 @@ final class AppState: ObservableObject {
     @Published var recentTranscriptions: [TranscriptionEntry] = []
     @Published var availableDevices: [AudioDevice] = []
     @Published var historyLimit: Int = 5
+    @Published var customWords: [CustomWordEntry] = []
+    @Published var whisperPrompt: String = ""
+    @Published var launchAtLogin: Bool = false
+    @Published var sttLanguage: String = "en"
+    @Published var injectionDelayMs: Int = 0
+    @Published var silenceSensitivity: Double = 0.1
+    @Published var soundEffectsEnabled: Bool = false
 
     // Agent integration
     @Published var agentServers: [AgentServer] = []
     @Published var chatTrigger: HotkeyTrigger?
+    @Published var toggleTrigger: HotkeyTrigger?
     let agentClientManager = AgentClientManager()
     private var chatWindow: NSPanel?
     private var chatAgents: [AgentProfile] = []
@@ -99,6 +108,40 @@ final class AppState: ObservableObject {
            let trigger = try? JSONDecoder().decode(HotkeyTrigger.self, from: data) {
             chatTrigger = trigger
         }
+        // Load custom words
+        if let json = try? store.getString("custom_words"),
+           let data = json.data(using: .utf8),
+           let entries = try? JSONDecoder().decode([CustomWordEntry].self, from: data) {
+            customWords = entries
+        }
+        // Load whisper prompt
+        if let prompt = try? store.getString("whisper_prompt") {
+            whisperPrompt = prompt
+        }
+        // Load launch at login
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+        // Load STT language
+        if let lang = try? store.getString("stt_language"), !lang.isEmpty {
+            sttLanguage = lang
+        }
+        // Load injection delay
+        if let delayStr = try? store.getString("injection_delay_ms"), let delay = Int(delayStr) {
+            injectionDelayMs = delay
+        }
+        // Load silence sensitivity
+        if let sensStr = try? store.getString("silence_sensitivity"), let sens = Double(sensStr) {
+            silenceSensitivity = sens
+        }
+        // Load sound effects
+        if let value = try? store.getString("sound_effects") {
+            soundEffectsEnabled = value == "true"
+        }
+        // Load toggle trigger
+        if let json = try? store.getString("hotkey_toggle_trigger"),
+           let data = json.data(using: .utf8),
+           let trigger = try? JSONDecoder().decode(HotkeyTrigger.self, from: data) {
+            toggleTrigger = trigger
+        }
         // Load agent servers
         if let json = try? store.getString("agent_servers"),
            let data = json.data(using: .utf8),
@@ -171,6 +214,76 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Agent Server CRUD
+
+    func saveCustomWords(_ entries: [CustomWordEntry]) {
+        guard let store = settingsStore else { return }
+        if let data = try? JSONEncoder().encode(entries),
+           let json = String(data: data, encoding: .utf8) {
+            try? store.setString("custom_words", value: json)
+        }
+        customWords = entries
+    }
+
+    func saveWhisperPrompt(_ prompt: String) {
+        guard let store = settingsStore else { return }
+        try? store.setString("whisper_prompt", value: prompt)
+        whisperPrompt = prompt
+        // Restart backend so it picks up new prompt
+        activeBackend = nil
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled { try SMAppService.mainApp.register() }
+            else { try SMAppService.mainApp.unregister() }
+            launchAtLogin = enabled
+        } catch {
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    func setSTTLanguage(_ language: String) {
+        guard let store = settingsStore else { return }
+        try? store.setString("stt_language", value: language)
+        sttLanguage = language
+        activeBackend = nil
+    }
+
+    func setInjectionDelay(_ ms: Int) {
+        guard let store = settingsStore else { return }
+        try? store.setString("injection_delay_ms", value: String(ms))
+        injectionDelayMs = ms
+    }
+
+    func setSilenceSensitivity(_ value: Double) {
+        guard let store = settingsStore else { return }
+        try? store.setString("silence_sensitivity", value: String(value))
+        silenceSensitivity = value
+    }
+
+    func setSoundEffects(_ enabled: Bool) {
+        guard let store = settingsStore else { return }
+        try? store.setString("sound_effects", value: enabled ? "true" : "false")
+        soundEffectsEnabled = enabled
+    }
+
+    private func playSound(_ name: String) {
+        guard soundEffectsEnabled else { return }
+        NSSound(named: name)?.play()
+    }
+
+    func saveToggleTrigger(_ trigger: HotkeyTrigger?) {
+        guard let store = settingsStore else { return }
+        if let trigger = trigger,
+           let data = try? JSONEncoder().encode(trigger),
+           let json = String(data: data, encoding: .utf8) {
+            try? store.setString("hotkey_toggle_trigger", value: json)
+        } else {
+            try? store.setString("hotkey_toggle_trigger", value: "")
+        }
+        toggleTrigger = trigger
+        reloadHotkey()
+    }
 
     func saveChatTrigger(_ trigger: HotkeyTrigger) {
         guard let store = settingsStore else { return }
@@ -264,7 +377,7 @@ final class AppState: ObservableObject {
     }
 
     private func setupHotkey() {
-        let hk = HotkeyManager(voiceTrigger: currentTrigger, chatTrigger: chatTrigger)
+        let hk = HotkeyManager(voiceTrigger: currentTrigger, chatTrigger: chatTrigger, toggleTrigger: toggleTrigger)
         hk.onKeyDown = { [weak self] in
             Task { @MainActor in self?.startListening() }
         }
@@ -273,6 +386,9 @@ final class AppState: ObservableObject {
         }
         hk.onChatToggle = { [weak self] in
             Task { @MainActor in self?.toggleChatWindow() }
+        }
+        hk.onToggleListening = { [weak self] in
+            Task { @MainActor in self?.startListening() }
         }
         do {
             try hk.start()
@@ -290,6 +406,7 @@ final class AppState: ObservableObject {
 
     private func startListening() {
         voxState = .listening
+        playSound("Tink")
         do { try audioManager?.startRecording() }
         catch { voxState = .error("Recording failed: \(error.localizedDescription)") }
     }
@@ -297,7 +414,8 @@ final class AppState: ObservableObject {
     private func stopListeningAndProcess() {
         guard let audioManager else { return }
         let audio = audioManager.stopRecording()
-        guard audio.duration > 0.1 else { voxState = .idle; return }
+        guard audio.duration > silenceSensitivity else { voxState = .idle; return }
+        playSound("Pop")
         voxState = .processing
         Task {
             do {
@@ -306,12 +424,18 @@ final class AppState: ObservableObject {
                 let processStart = Date()
                 let result = try await backend.transcribe(audio: audio)
                 let latencyMs = Int(Date().timeIntervalSince(processStart) * 1000)
-                let formatted = formatterRegistry.active(name: activeFormatterName).format(result.text)
+                let replacer = CustomWordReplacer(entries: customWords)
+                let corrected = replacer.apply(result.text)
+                let formatted = formatterRegistry.active(name: activeFormatterName).format(corrected)
                 lastTranscript = formatted
                 if let injector = textInjector {
+                    if injectionDelayMs > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(injectionDelayMs) * 1_000_000)
+                    }
                     let injResult = await injector.inject(text: formatted, strategy: .clipboard, autoEnter: autoEnterEnabled)
                     if injResult.success {
                         voxState = .success
+                        playSound("Glass")
                         let durationMs = Int(audio.duration * 1000)
                         try? transcriptionHistory?.record(text: formatted, durationMs: durationMs, latencyMs: latencyMs)
                         refreshStats()
@@ -339,13 +463,15 @@ final class AppState: ObservableObject {
                 return nil
             }
             let modelPath = appSupport.appendingPathComponent("Models/ggml-small.bin").path
-            return WhisperCppBackend(scriptPath: scriptPath, modelPath: modelPath)
+            let prompt = whisperPrompt.isEmpty ? nil : whisperPrompt
+            return WhisperCppBackend(scriptPath: scriptPath, modelPath: modelPath, initialPrompt: prompt, language: sttLanguage)
         case "mlx-whisper":
             guard let scriptPath = Bundle.main.path(forResource: "server", ofType: "py", inDirectory: "mlx-whisper-sidecar") else {
                 voxState = .error("Missing MLX sidecar script in bundle")
                 return nil
             }
-            return MLXWhisperBackend(scriptPath: scriptPath)
+            let prompt = whisperPrompt.isEmpty ? nil : whisperPrompt
+            return MLXWhisperBackend(scriptPath: scriptPath, initialPrompt: prompt, language: sttLanguage)
         default: return nil
         }
     }
