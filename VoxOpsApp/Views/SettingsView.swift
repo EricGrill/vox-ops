@@ -323,29 +323,43 @@ struct SettingsView: View {
 
 // MARK: - Key event capture for the recorder
 
+private class KeyDownMonitor: ObservableObject {
+    var monitor: Any?
+
+    func start(handler: @escaping (UInt16, NSEvent.ModifierFlags) -> Bool) {
+        stop()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if handler(UInt16(event.keyCode), event.modifierFlags) {
+                return nil
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    deinit { stop() }
+}
+
 struct KeyDownHandler: ViewModifier {
     @Binding var isActive: Bool
     let handler: (UInt16, NSEvent.ModifierFlags) -> Bool
-    @State private var monitor: Any?
+    @StateObject private var keyMonitor = KeyDownMonitor()
 
     func body(content: Content) -> some View {
         content
             .onChange(of: isActive) { _, active in
                 if active {
-                    monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                        if handler(UInt16(event.keyCode), event.modifierFlags) {
-                            return nil
-                        }
-                        return event
-                    }
+                    keyMonitor.start(handler: handler)
                 } else {
-                    if let monitor { NSEvent.removeMonitor(monitor) }
-                    monitor = nil
+                    keyMonitor.stop()
                 }
             }
             .onDisappear {
-                if let monitor { NSEvent.removeMonitor(monitor) }
-                monitor = nil
+                keyMonitor.stop()
             }
     }
 }

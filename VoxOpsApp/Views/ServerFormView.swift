@@ -200,11 +200,25 @@ struct ServerFormView: View {
 
     private static func readLocalOpenClawToken() -> String? {
         let home = FileManager.default.homeDirectoryForCurrentUser
+
+        // Try openclaw.json config (primary source)
+        let configFile = home.appendingPathComponent(".openclaw/openclaw.json")
+        if let data = try? Data(contentsOf: configFile),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let gateway = json["gateway"] as? [String: Any],
+           let auth = gateway["auth"] as? [String: Any],
+           let token = auth["token"] as? String, !token.isEmpty {
+            return token
+        }
+
+        // Fallback: gateway-token file
         let tokenFile = home.appendingPathComponent(".openclaw/gateway-token")
         if let raw = try? String(contentsOf: tokenFile, encoding: .utf8) {
             let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !token.isEmpty { return token }
         }
+
+        // Fallback: .env file
         let envFile = home.appendingPathComponent(".openclaw/.env")
         if let contents = try? String(contentsOf: envFile, encoding: .utf8) {
             for line in contents.components(separatedBy: .newlines) {

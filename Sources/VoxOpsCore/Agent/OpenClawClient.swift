@@ -15,11 +15,22 @@ public struct AgentListEntry: Sendable {
     public let name: String
 }
 
-public enum OpenClawError: Error, Sendable {
+public enum OpenClawError: Error, Sendable, LocalizedError {
     case invalidFrame(String)
     case connectionFailed(String)
     case authFailed(String)
     case notConnected
+    case timeout
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidFrame(let msg): return "Invalid frame: \(msg)"
+        case .connectionFailed(let msg): return "Connection failed: \(msg)"
+        case .authFailed(let msg): return "Auth failed: \(msg)"
+        case .notConnected: return "Not connected"
+        case .timeout: return "Request timed out"
+        }
+    }
 }
 
 // MARK: - OpenClawFrames
@@ -29,11 +40,27 @@ public enum OpenClawFrames {
     // MARK: Frame Builders
 
     public static func connect(id: String, token: String) -> Data {
+        var params: [String: Any] = [
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "client": [
+                "id": "openclaw-control-ui",
+                "version": "1.0.0",
+                "platform": "macos",
+                "mode": "ui",
+                "displayName": "VoxOps",
+            ] as [String: Any],
+            "role": "operator",
+            "scopes": ["operator.read", "operator.write"],
+        ]
+        if !token.isEmpty {
+            params["auth"] = ["token": token]
+        }
         let frame: [String: Any] = [
             "type": "req",
             "method": "connect",
             "id": id,
-            "params": ["token": token],
+            "params": params,
         ]
         return try! JSONSerialization.data(withJSONObject: frame)
     }
@@ -43,6 +70,7 @@ public enum OpenClawFrames {
             "type": "req",
             "method": "agents.list",
             "id": id,
+            "params": [:] as [String: Any],
         ]
         return try! JSONSerialization.data(withJSONObject: frame)
     }
@@ -69,42 +97,57 @@ public enum OpenClawFrames {
 
     // MARK: Frame Parsers
 
-    /// Returns `(runId, event)`. Event is nil for "done" signals.
-    public static func parseEvent(from data: Data) throws -> (runId: String?, event: AgentEvent?) {
+    /// Parse any incoming JSON frame into its type
+    public static func parseFrame(from data: Data) throws -> (type: String, json: [String: Any]) {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw OpenClawError.invalidFrame("Not a JSON object")
         }
-        let runId = json["runId"] as? String
-        guard let eventDict = json["event"] as? [String: Any],
-              let kind = eventDict["kind"] as? String
-        else {
-            throw OpenClawError.invalidFrame("Missing event.kind")
+        guard let type = json["type"] as? String else {
+            throw OpenClawError.invalidFrame("Missing 'type' field")
         }
-        switch kind {
-        case "textChunk":
-            let text = eventDict["text"] as? String ?? ""
-            return (runId, .textChunk(text))
-        case "error":
-            let message = eventDict["message"] as? String ?? "Unknown error"
-            return (runId, .error(message))
-        case "done":
-            return (runId, nil)
-        default:
-            throw OpenClawError.invalidFrame("Unknown event kind: \(kind)")
-        }
+        return (type, json)
     }
 
     public static func parseResponse(from data: Data) throws -> OpenClawResponse {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw OpenClawError.invalidFrame("Not a JSON object")
+        let (type, json) = try parseFrame(from: data)
+        guard type == "res" else {
+            throw OpenClawError.invalidFrame("Expected 'res', got '\(type)'")
         }
         guard let id = json["id"] as? String else {
             throw OpenClawError.invalidFrame("Missing response id")
         }
         let ok = json["ok"] as? Bool ?? false
         let payload = json["payload"] as? [String: Any]
-        let errorMessage = json["error"] as? String
+        // Error can be a string or an object with "message" field
+        let errorMessage: String?
+        if let errObj = json["error"] as? [String: Any] {
+            errorMessage = errObj["message"] as? String
+        } else {
+            errorMessage = json["error"] as? String
+        }
         return OpenClawResponse(id: id, ok: ok, payload: payload, errorMessage: errorMessage)
+    }
+
+    /// Returns `(runId, event)`. Event is nil for "done" signals.
+    public static func parseStreamEvent(from json: [String: Any]) throws -> (runId: String?, event: AgentEvent?) {
+        let runId = json["runId"] as? String
+        guard let payload = json["payload"] as? [String: Any],
+              let kind = payload["kind"] as? String
+        else {
+            throw OpenClawError.invalidFrame("Missing payload.kind in event")
+        }
+        switch kind {
+        case "textChunk":
+            let text = payload["text"] as? String ?? ""
+            return (runId, .textChunk(text))
+        case "error":
+            let message = payload["message"] as? String ?? "Unknown error"
+            return (runId, .error(message))
+        case "done":
+            return (runId, nil)
+        default:
+            throw OpenClawError.invalidFrame("Unknown event kind: \(kind)")
+        }
     }
 
     public static func parseAgentsList(from response: OpenClawResponse) throws -> [AgentListEntry] {
@@ -114,9 +157,17 @@ public enum OpenClawFrames {
             throw OpenClawError.invalidFrame("Missing agents array in payload")
         }
         return agents.compactMap { dict -> AgentListEntry? in
-            guard let id = dict["id"] as? String,
-                  let name = dict["name"] as? String
-            else { return nil }
+            guard let id = dict["id"] as? String else { return nil }
+            // Name can be at top level or inside identity object
+            let name: String
+            if let n = dict["name"] as? String {
+                name = n
+            } else if let identity = dict["identity"] as? [String: Any],
+                      let n = identity["name"] as? String {
+                name = n
+            } else {
+                name = id
+            }
             return AgentListEntry(id: id, name: name)
         }
     }
@@ -144,6 +195,8 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
     private var runStreams: [String: AsyncThrowingStream<AgentEvent, Error>.Continuation] = [:]
     /// Maps requestId → stream continuation (pending until runId arrives)
     private var pendingStreams: [String: AsyncThrowingStream<AgentEvent, Error>.Continuation] = [:]
+    /// Maps requestId → response continuation (for request/response calls like listAgents)
+    private var responseHandlers: [String: CheckedContinuation<OpenClawResponse, Error>] = [:]
 
     private var receiveTask: Task<Void, Never>?
 
@@ -162,7 +215,18 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
 
     public func connect() async throws {
         let session = URLSession(configuration: .default)
-        let task = session.webSocketTask(with: url)
+
+        // Build request with Origin header for control-ui auth
+        var request = URLRequest(url: url)
+        // Derive Origin from the gateway URL (http scheme, same host:port)
+        var originComponents = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        originComponents.scheme = "http"
+        originComponents.path = ""
+        if let origin = originComponents.url?.absoluteString {
+            request.addValue(origin, forHTTPHeaderField: "Origin")
+        }
+
+        let task = session.webSocketTask(with: request)
         task.resume()
 
         lock.lock()
@@ -170,15 +234,26 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
         self.webSocketTask = task
         lock.unlock()
 
-        // Send connect frame
+        // Server sends a connect.challenge event first — read and discard it
+        let challengeData = try await receiveRaw()
+        if let challengeStr = String(data: challengeData, encoding: .utf8) {
+            NSLog("[VoxOps] connect challenge: %@", String(challengeStr.prefix(500)))
+        }
+
+        // Send connect frame with proper protocol v3 params
         let reqId = UUID().uuidString
         let frame = OpenClawFrames.connect(id: reqId, token: token)
         try await sendRaw(frame)
 
-        // Wait for response
+        // Wait for response — could be "res" type (ok/error)
         let responseData = try await receiveRaw()
+        if let respStr = String(data: responseData, encoding: .utf8) {
+            NSLog("[VoxOps] connect response: %@", String(respStr.prefix(500)))
+        }
+
         let response = try OpenClawFrames.parseResponse(from: responseData)
         guard response.ok else {
+            NSLog("[VoxOps] OpenClaw auth failed: %@", response.errorMessage ?? "unknown")
             throw OpenClawError.authFailed(response.errorMessage ?? "Auth failed")
         }
 
@@ -187,7 +262,7 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
         reconnectAttempts = 0
         lock.unlock()
 
-        // Start background receive loop
+        NSLog("[VoxOps] OpenClaw connected successfully to %@", url.absoluteString)
         startReceiveLoop()
     }
 
@@ -203,12 +278,13 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
 
         lock.lock()
         webSocketTask = nil
-        // Finish all pending streams with cancellation
         for continuation in pendingStreams.values { continuation.finish(throwing: CancellationError()) }
         for continuation in runStreams.values { continuation.finish(throwing: CancellationError()) }
+        for handler in responseHandlers.values { handler.resume(throwing: CancellationError()) }
         pendingStreams.removeAll()
         runStreams.removeAll()
         requestToRunId.removeAll()
+        responseHandlers.removeAll()
         lock.unlock()
     }
 
@@ -217,15 +293,47 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
 
         let reqId = UUID().uuidString
         let frame = OpenClawFrames.agentsList(id: reqId)
-        try await sendRaw(frame)
 
-        let responseData = try await receiveRaw()
-        let response = try OpenClawFrames.parseResponse(from: responseData)
+        // Use a timeout so we don't hang forever
+        let response: OpenClawResponse = try await withThrowingTaskGroup(of: OpenClawResponse.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { continuation in
+                    self.lock.lock()
+                    self.responseHandlers[reqId] = continuation
+                    self.lock.unlock()
+                    Task {
+                        do {
+                            try await self.sendRaw(frame)
+                        } catch {
+                            self.lock.lock()
+                            let handler = self.responseHandlers.removeValue(forKey: reqId)
+                            self.lock.unlock()
+                            handler?.resume(throwing: error)
+                        }
+                    }
+                }
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 10_000_000_000) // 10s timeout
+                self.lock.lock()
+                let handler = self.responseHandlers.removeValue(forKey: reqId)
+                self.lock.unlock()
+                handler?.resume(throwing: OpenClawError.timeout)
+                throw OpenClawError.timeout
+            }
+
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+
+        NSLog("[VoxOps] listAgents response ok=%d payload=%@", response.ok ? 1 : 0, String(describing: response.payload))
         guard response.ok else {
             throw OpenClawError.connectionFailed(response.errorMessage ?? "Failed to list agents")
         }
 
         let entries = try OpenClawFrames.parseAgentsList(from: response)
+        NSLog("[VoxOps] parsed %d agents", entries.count)
         return entries.map { entry in
             AgentProfile(id: entry.id, serverId: serverId, name: entry.name)
         }
@@ -240,45 +348,61 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
                 do {
                     try await ensureConnected()
 
-                    lock.lock()
-                    pendingStreams[reqId] = continuation
-                    lock.unlock()
-
-                    let frame = OpenClawFrames.agent(
-                        id: reqId,
-                        messages: messages,
-                        agentId: agentId,
-                        idempotencyKey: idempotencyKey
-                    )
-                    try await sendRaw(frame)
-
-                    // Wait for the response that maps reqId → runId
-                    let responseData = try await receiveRaw()
-                    let response = try OpenClawFrames.parseResponse(from: responseData)
+                    let response: OpenClawResponse = try await withThrowingTaskGroup(of: OpenClawResponse.self) { group in
+                        group.addTask {
+                            try await withCheckedThrowingContinuation { respContinuation in
+                                self.lock.lock()
+                                self.responseHandlers[reqId] = respContinuation
+                                self.lock.unlock()
+                                Task {
+                                    do {
+                                        let frame = OpenClawFrames.agent(
+                                            id: reqId,
+                                            messages: messages,
+                                            agentId: agentId,
+                                            idempotencyKey: idempotencyKey
+                                        )
+                                        try await self.sendRaw(frame)
+                                    } catch {
+                                        self.lock.lock()
+                                        let handler = self.responseHandlers.removeValue(forKey: reqId)
+                                        self.lock.unlock()
+                                        handler?.resume(throwing: error)
+                                    }
+                                }
+                            }
+                        }
+                        group.addTask {
+                            try await Task.sleep(nanoseconds: 30_000_000_000)
+                            self.lock.lock()
+                            let handler = self.responseHandlers.removeValue(forKey: reqId)
+                            self.lock.unlock()
+                            handler?.resume(throwing: OpenClawError.timeout)
+                            throw OpenClawError.timeout
+                        }
+                        let result = try await group.next()!
+                        group.cancelAll()
+                        return result
+                    }
 
                     guard response.ok else {
-                        lock.lock()
-                        pendingStreams.removeValue(forKey: reqId)
-                        lock.unlock()
                         continuation.finish(throwing: OpenClawError.connectionFailed(
                             response.errorMessage ?? "Agent request failed"
                         ))
                         return
                     }
 
-                    // The response payload may include a runId; if so, migrate the pending stream
                     if let payload = response.payload, let runId = payload["runId"] as? String {
                         lock.lock()
-                        pendingStreams.removeValue(forKey: reqId)
                         requestToRunId[reqId] = runId
                         runStreams[runId] = continuation
                         lock.unlock()
+                    } else {
+                        lock.lock()
+                        pendingStreams[reqId] = continuation
+                        lock.unlock()
                     }
-                    // If no runId in response, leave stream pending; the receive loop will route by runId from events
                 } catch {
-                    lock.lock()
-                    pendingStreams.removeValue(forKey: reqId)
-                    lock.unlock()
                     continuation.finish(throwing: error)
                 }
             }
@@ -298,8 +422,8 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
         lock.lock()
         let connected = isConnected
         lock.unlock()
-        guard connected else {
-            throw OpenClawError.notConnected
+        if !connected {
+            try await connect()
         }
     }
 
@@ -339,7 +463,6 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
                     await self.handleIncoming(data: data)
                 } catch {
                     if Task.isCancelled { break }
-                    // Check if reconnect is warranted
                     await self.handleDisconnect(error: error)
                     break
                 }
@@ -348,37 +471,67 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
     }
 
     private func handleIncoming(data: Data) async {
-        // Try parsing as event first
-        if let result = try? OpenClawFrames.parseEvent(from: data) {
-            guard let runId = result.runId else { return }
-            lock.lock()
-            let continuation = runStreams[runId]
-            lock.unlock()
-            if let continuation {
-                if let event = result.event {
-                    continuation.yield(event)
-                } else {
-                    continuation.finish()
+        let raw = String(data: data, encoding: .utf8) ?? "<binary>"
+        NSLog("[VoxOps] incoming: %@", String(raw.prefix(1000)))
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String
+        else {
+            NSLog("[VoxOps] unhandled frame (no type): %@", String(raw.prefix(500)))
+            return
+        }
+
+        // Handle response frames (listAgents, agent acks, etc.)
+        if type == "res" {
+            if let response = try? OpenClawFrames.parseResponse(from: data) {
+                lock.lock()
+                let handler = responseHandlers.removeValue(forKey: response.id)
+                lock.unlock()
+                if let handler {
+                    handler.resume(returning: response)
+                    return
+                }
+
+                if let payload = response.payload, let runId = payload["runId"] as? String {
                     lock.lock()
-                    runStreams.removeValue(forKey: runId)
+                    let pending = pendingStreams.removeValue(forKey: response.id)
+                    if let pending {
+                        requestToRunId[response.id] = runId
+                        runStreams[runId] = pending
+                    }
                     lock.unlock()
                 }
             }
             return
         }
 
-        // Otherwise try as response (e.g. for agent req that returns runId)
-        if let response = try? OpenClawFrames.parseResponse(from: data) {
-            if let payload = response.payload, let runId = payload["runId"] as? String {
+        // Handle event frames (streaming agent events, server pushes)
+        if type == "event" {
+            let eventName = json["event"] as? String ?? ""
+            // Agent streaming events have payload.kind
+            if let result = try? OpenClawFrames.parseStreamEvent(from: json) {
+                guard let runId = result.runId else { return }
                 lock.lock()
-                let pending = pendingStreams.removeValue(forKey: response.id)
-                if let pending {
-                    requestToRunId[response.id] = runId
-                    runStreams[runId] = pending
-                }
+                let continuation = runStreams[runId]
                 lock.unlock()
+                if let continuation {
+                    if let event = result.event {
+                        continuation.yield(event)
+                    } else {
+                        continuation.finish()
+                        lock.lock()
+                        runStreams.removeValue(forKey: runId)
+                        lock.unlock()
+                    }
+                }
+                return
             }
+            // Other server events (presence, health, etc.) — ignore for now
+            NSLog("[VoxOps] ignoring event: %@", eventName)
+            return
         }
+
+        NSLog("[VoxOps] unhandled frame type '%@': %@", type, String(raw.prefix(500)))
     }
 
     private func handleDisconnect(error: Error) async {
@@ -387,8 +540,9 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
         let attempts = reconnectAttempts
         lock.unlock()
 
+        NSLog("[VoxOps] disconnected: %@, attempt %d", error.localizedDescription, attempts)
+
         guard attempts < Self.maxReconnectAttempts else {
-            // Exhaust all streams
             lock.lock()
             for c in pendingStreams.values { c.finish(throwing: error) }
             for c in runStreams.values { c.finish(throwing: error) }
