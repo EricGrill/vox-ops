@@ -38,6 +38,23 @@ struct MenuBarMainTab: View {
 
             Divider()
 
+            // Auto-Enter toggle
+            HStack {
+                Text("Auto-Enter")
+                    .font(.system(size: 11))
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { appState.autoEnterEnabled },
+                    set: { appState.saveAutoEnter($0) }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+
+            Divider()
+
             // Mic picker
             VStack(alignment: .leading, spacing: 4) {
                 Text("MICROPHONE").font(.system(size: 10)).foregroundStyle(.secondary).tracking(0.5)

@@ -10,6 +10,7 @@ public final class HotkeyManager: @unchecked Sendable {
     private var chatTrigger: HotkeyTrigger?
     private var toggleTrigger: HotkeyTrigger?
     private var isVoiceActive = false
+    private var isToggleMode = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var retainedSelf: Unmanaged<HotkeyManager>?
@@ -71,6 +72,7 @@ public final class HotkeyManager: @unchecked Sendable {
         let wasActive = isVoiceActive
         let handler = wasActive ? onKeyUp : nil
         isVoiceActive = false
+        isToggleMode = false
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source = runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         eventTap = nil
@@ -88,8 +90,8 @@ public final class HotkeyManager: @unchecked Sendable {
         let activeModifiers = event.flags.intersection(modifierMask)
         let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
 
-        // If voice is active via PTT, check if voice modifiers were released
-        if isVoiceActive && type == .flagsChanged {
+        // If voice is active via PTT (not toggle), check if voice modifiers were released
+        if isVoiceActive && !isToggleMode && type == .flagsChanged {
             let requiredModifiers = voiceTrigger.cgEventFlags
             if !activeModifiers.contains(requiredModifiers) {
                 isVoiceActive = false
@@ -98,18 +100,14 @@ public final class HotkeyManager: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
 
-        // Toggle-to-talk: single press starts/stops listening
+        // Toggle-to-talk: single press toggles listening
         if let toggle = toggleTrigger, type == .keyDown, CGKeyCode(toggle.keyCode) == eventKeyCode {
             let required = toggle.cgEventFlags
             if required.isEmpty || activeModifiers.contains(required) {
                 if !isAutoRepeat {
-                    if isVoiceActive {
-                        isVoiceActive = false
-                        onKeyUp?()
-                    } else {
-                        isVoiceActive = true
-                        onToggleListening?()
-                    }
+                    isToggleMode = !isToggleMode
+                    isVoiceActive = isToggleMode
+                    onToggleListening?()
                 }
                 return nil
             }
@@ -124,6 +122,11 @@ public final class HotkeyManager: @unchecked Sendable {
                 }
                 return nil
             }
+        }
+
+        // When toggle-to-talk is active, skip push-to-talk entirely
+        if isToggleMode {
+            return Unmanaged.passUnretained(event)
         }
 
         // Voice trigger: push-to-talk hold

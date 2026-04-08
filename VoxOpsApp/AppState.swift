@@ -340,7 +340,16 @@ final class AppState: ObservableObject {
 
     private func registerClient(for server: AgentServer) async {
         let keychain = KeychainStore()
-        let token = keychain.retrieve(key: KeychainStore.agentTokenKey(serverId: server.id))
+        var token = keychain.retrieve(key: KeychainStore.agentTokenKey(serverId: server.id))
+
+        // For OpenClaw, try reading the local gateway token if none in keychain
+        if token == nil && server.type == .openclaw {
+            token = Self.readLocalOpenClawToken()
+            // Persist it to keychain for next time
+            if let t = token {
+                try? keychain.save(key: KeychainStore.agentTokenKey(serverId: server.id), value: t)
+            }
+        }
 
         switch server.type {
         case .openclaw:
@@ -353,6 +362,18 @@ final class AppState: ObservableObject {
             agentClientManager.register(client: client)
             try? await client.connect()
         }
+    }
+
+    private static func readLocalOpenClawToken() -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let configFile = home.appendingPathComponent(".openclaw/openclaw.json")
+        guard let data = try? Data(contentsOf: configFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let gateway = json["gateway"] as? [String: Any],
+              let auth = gateway["auth"] as? [String: Any],
+              let token = auth["token"] as? String, !token.isEmpty
+        else { return nil }
+        return token
     }
 
     // MARK: - Chat Window
@@ -388,13 +409,13 @@ final class AppState: ObservableObject {
             Task { @MainActor in self?.toggleChatWindow() }
         }
         hk.onToggleListening = { [weak self] in
-            Task { @MainActor in self?.startListening() }
+            Task { @MainActor in self?.handleToggle() }
         }
         do {
             try hk.start()
             self.hotkeyManager = hk
         } catch {
-            voxState = .error("Hotkey setup failed: \(error.localizedDescription)")
+            voxState = .error("Hotkey failed: \(error)")
         }
     }
 
@@ -402,6 +423,14 @@ final class AppState: ObservableObject {
         hotkeyManager?.stop()
         hotkeyManager = nil
         setupHotkey()
+    }
+
+    private func handleToggle() {
+        if case .listening = voxState {
+            stopListeningAndProcess()
+        } else {
+            startListening()
+        }
     }
 
     private func startListening() {

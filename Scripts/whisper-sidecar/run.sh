@@ -21,7 +21,7 @@ while IFS= read -r wav_path; do
     fi
     "$WHISPER_CLI" --model "$WHISPER_MODEL" --file "$wav_path" \
         --output-json --no-timestamps --language "$WHISPER_LANG" \
-        "${prompt_args[@]}" \
+        ${prompt_args[@]+"${prompt_args[@]}"} \
         --output-file "$output_base" >/dev/null 2>/dev/null || true
 
     json_file="${output_base}.json"
