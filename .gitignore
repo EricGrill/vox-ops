@@ -1,6 +1,9 @@
 .DS_Store
 .build/
+build/
 .swiftpm/
+.superpowers/
+.hooks/
 *.xcodeproj
 *.xcworkspace
 DerivedData/

@@ -50,8 +50,11 @@ final class AppState: ObservableObject {
 
     func setup() {
         do {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("VoxOps")
+            guard let appSupportBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                voxState = .error("Cannot find Application Support directory")
+                return
+            }
+            let appSupport = appSupportBase.appendingPathComponent("VoxOps")
             try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
             let db = try Database(directory: appSupport)
             self.database = db
@@ -483,8 +486,8 @@ final class AppState: ObservableObject {
     }
 
     private func createBackend() -> (any STTBackend)? {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("VoxOps")
+        guard let appSupportBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let appSupport = appSupportBase.appendingPathComponent("VoxOps")
         switch selectedBackend {
         case "whisper.cpp":
             guard let scriptPath = Bundle.main.path(forResource: "run", ofType: "sh", inDirectory: "whisper-sidecar") else {

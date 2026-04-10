@@ -62,7 +62,7 @@ public enum OpenClawFrames {
             "id": id,
             "params": params,
         ]
-        return try! JSONSerialization.data(withJSONObject: frame)
+        return (try? JSONSerialization.data(withJSONObject: frame)) ?? Data()
     }
 
     public static func agentsList(id: String) -> Data {
@@ -72,7 +72,7 @@ public enum OpenClawFrames {
             "id": id,
             "params": [:] as [String: Any],
         ]
-        return try! JSONSerialization.data(withJSONObject: frame)
+        return (try? JSONSerialization.data(withJSONObject: frame)) ?? Data()
     }
 
     public static func agent(
@@ -92,7 +92,7 @@ public enum OpenClawFrames {
                 "messages": encodedMessages,
             ] as [String: Any],
         ]
-        return try! JSONSerialization.data(withJSONObject: frame)
+        return (try? JSONSerialization.data(withJSONObject: frame)) ?? Data()
     }
 
     // MARK: Frame Parsers
@@ -219,11 +219,12 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
         // Build request with Origin header for control-ui auth
         var request = URLRequest(url: url)
         // Derive Origin from the gateway URL (http scheme, same host:port)
-        var originComponents = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-        originComponents.scheme = "http"
-        originComponents.path = ""
-        if let origin = originComponents.url?.absoluteString {
-            request.addValue(origin, forHTTPHeaderField: "Origin")
+        if var originComponents = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            originComponents.scheme = "http"
+            originComponents.path = ""
+            if let origin = originComponents.url?.absoluteString {
+                request.addValue(origin, forHTTPHeaderField: "Origin")
+            }
         }
 
         let task = session.webSocketTask(with: request)
@@ -322,7 +323,9 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
                 throw OpenClawError.timeout
             }
 
-            let result = try await group.next()!
+            guard let result = try await group.next() else {
+                throw OpenClawError.timeout
+            }
             group.cancelAll()
             return result
         }
@@ -537,33 +540,43 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
     private func handleDisconnect(error: Error) async {
         lock.lock()
         isConnected = false
-        let attempts = reconnectAttempts
         lock.unlock()
 
-        NSLog("[VoxOps] disconnected: %@, attempt %d", error.localizedDescription, attempts)
+        NSLog("[VoxOps] disconnected: %@", error.localizedDescription)
 
-        guard attempts < Self.maxReconnectAttempts else {
+        // Reconnect loop (non-recursive to avoid stack overflow)
+        while !Task.isCancelled {
             lock.lock()
-            for c in pendingStreams.values { c.finish(throwing: error) }
-            for c in runStreams.values { c.finish(throwing: error) }
-            pendingStreams.removeAll()
-            runStreams.removeAll()
+            let attempts = reconnectAttempts
             lock.unlock()
-            return
-        }
 
-        let delay = Self.baseBackoffSeconds * pow(2.0, Double(attempts))
-        let clampedDelay = min(delay, 8.0)
-        lock.lock()
-        reconnectAttempts += 1
-        lock.unlock()
+            guard attempts < Self.maxReconnectAttempts else {
+                NSLog("[VoxOps] max reconnect attempts reached, giving up")
+                lock.lock()
+                for c in pendingStreams.values { c.finish(throwing: error) }
+                for c in runStreams.values { c.finish(throwing: error) }
+                pendingStreams.removeAll()
+                runStreams.removeAll()
+                lock.unlock()
+                return
+            }
 
-        try? await Task.sleep(nanoseconds: UInt64(clampedDelay * 1_000_000_000))
+            let delay = Self.baseBackoffSeconds * pow(2.0, Double(attempts))
+            let clampedDelay = min(delay, 8.0)
+            lock.lock()
+            reconnectAttempts += 1
+            lock.unlock()
 
-        do {
-            try await connect()
-        } catch {
-            await handleDisconnect(error: error)
+            NSLog("[VoxOps] reconnect attempt %d in %.1fs", attempts + 1, clampedDelay)
+            try? await Task.sleep(nanoseconds: UInt64(clampedDelay * 1_000_000_000))
+
+            do {
+                try await connect()
+                return // success
+            } catch {
+                NSLog("[VoxOps] reconnect failed: %@", error.localizedDescription)
+                continue
+            }
         }
     }
 }
