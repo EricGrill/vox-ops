@@ -14,5 +14,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoxOps needs microphone access for push-to-talk voice input.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>VoxOps uses on-device speech recognition to transcribe your voice input.</string>
 </dict>
 </plist>

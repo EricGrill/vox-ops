@@ -164,6 +164,7 @@ struct SettingsView: View {
                 Picker("Speech-to-Text Engine", selection: $selectedBackend) {
                     Text("whisper.cpp").tag("whisper.cpp")
                     Text("MLX Whisper").tag("mlx-whisper")
+                    Text("Apple Speech").tag("apple")
                 }
                 .onChange(of: selectedBackend) { _, newValue in appState.selectedBackend = newValue }
 
