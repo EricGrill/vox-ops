@@ -57,27 +57,42 @@ public final class SidecarProcess: @unchecked Sendable {
         pipe.fileHandleForWriting.write(data)
     }
 
-    public func readLine() async throws -> String {
-        guard let pipe = stdoutPipe else { throw SidecarError.notRunning }
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                let handle = pipe.fileHandleForReading
-                var accumulated = Data()
-                while true {
-                    let byte = handle.readData(ofLength: 1)
-                    if byte.isEmpty {
-                        let result = String(data: accumulated, encoding: .utf8) ?? ""
-                        continuation.resume(returning: result)
-                        return
+    public func readLine(timeoutSeconds: UInt64 = 30) async throws -> String {
+        lock.lock()
+        guard let pipe = stdoutPipe else { lock.unlock(); throw SidecarError.notRunning }
+        lock.unlock()
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { continuation in
+                    DispatchQueue.global().async {
+                        let handle = pipe.fileHandleForReading
+                        var accumulated = Data()
+                        while true {
+                            let byte = handle.readData(ofLength: 1)
+                            if byte.isEmpty {
+                                let result = String(data: accumulated, encoding: .utf8) ?? ""
+                                continuation.resume(returning: result)
+                                return
+                            }
+                            if byte.first == UInt8(ascii: "\n") {
+                                let result = String(data: accumulated, encoding: .utf8) ?? ""
+                                continuation.resume(returning: result)
+                                return
+                            }
+                            accumulated.append(byte)
+                        }
                     }
-                    if byte.first == UInt8(ascii: "\n") {
-                        let result = String(data: accumulated, encoding: .utf8) ?? ""
-                        continuation.resume(returning: result)
-                        return
-                    }
-                    accumulated.append(byte)
                 }
             }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                throw SidecarError.timeout
+            }
+            guard let result = try await group.next() else {
+                throw SidecarError.timeout
+            }
+            group.cancelAll()
+            return result
         }
     }
 

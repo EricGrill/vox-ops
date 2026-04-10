@@ -17,10 +17,16 @@ public final class AudioManager: @unchecked Sendable {
         recordedData = Data()
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
-        guard let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else { return }
+        guard let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else {
+            NSLog("[VoxOps] AudioManager: failed to create recording format")
+            return
+        }
         let busFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: busFormat) { [weak self] buffer, _ in
             guard let self else { return }
+            self.lock.lock()
+            guard self.isRecording else { self.lock.unlock(); return }
+            self.lock.unlock()
             if let converted = self.convert(buffer: buffer, to: recordingFormat) {
                 self.lock.lock()
                 self.recordedData.append(converted)
@@ -79,19 +85,31 @@ public final class AudioManager: @unchecked Sendable {
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
             let busFormat = inputNode.outputFormat(forBus: 0)
-            guard let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else { return }
+            guard let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else {
+                NSLog("[VoxOps] AudioManager: failed to create recording format during switchInput")
+                lock.lock(); isRecording = false; lock.unlock()
+                return
+            }
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: busFormat) { [weak self] buffer, _ in
                 guard let self else { return }
+                self.lock.lock()
+                guard self.isRecording else { self.lock.unlock(); return }
+                self.lock.unlock()
                 if let converted = self.convert(buffer: buffer, to: recordingFormat) {
                     self.lock.lock()
                     self.recordedData.append(converted)
                     self.lock.unlock()
                 }
             }
-            try? engine.start()
-            lock.lock()
-            self.audioEngine = engine
-            lock.unlock()
+            do {
+                try engine.start()
+                lock.lock()
+                self.audioEngine = engine
+                lock.unlock()
+            } catch {
+                NSLog("[VoxOps] AudioManager: engine failed to start during switchInput: %@", error.localizedDescription)
+                lock.lock(); isRecording = false; lock.unlock()
+            }
         }
     }
 

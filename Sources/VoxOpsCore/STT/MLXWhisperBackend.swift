@@ -77,6 +77,7 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
                 do {
                     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
                     guard fd >= 0 else { throw SidecarError.notRunning }
+                    defer { close(fd) }
                     var addr = sockaddr_un()
                     addr.sun_family = sa_family_t(AF_UNIX)
                     let pathBytes = sockPath.utf8CString
@@ -84,14 +85,18 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
                         let bound = ptr.withMemoryRebound(to: CChar.self, capacity: 104) { $0 }
                         for (i, byte) in pathBytes.enumerated() where i < 104 { bound[i] = byte }
                     }
-                    let addrLen = socklen_t(MemoryLayout.offset(of: \sockaddr_un.sun_path)! + sockPath.utf8.count + 1)
+                    guard let offset = MemoryLayout.offset(of: \sockaddr_un.sun_path) else { throw SidecarError.notRunning }
+                    let addrLen = socklen_t(offset + sockPath.utf8.count + 1)
                     let connectResult = withUnsafePointer(to: &addr) {
                         $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, addrLen) }
                     }
                     guard connectResult == 0 else { throw SidecarError.notRunning }
 
                     let message = tempFile.path + "\n"
-                    message.utf8CString.withUnsafeBufferPointer { _ = write(fd, $0.baseAddress!, message.utf8.count) }
+                    message.utf8CString.withUnsafeBufferPointer { buf in
+                        guard let base = buf.baseAddress else { return }
+                        _ = write(fd, base, message.utf8.count)
+                    }
 
                     var response = Data()
                     var buffer = [UInt8](repeating: 0, count: 4096)
@@ -101,7 +106,6 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
                         response.append(contentsOf: buffer[0..<n])
                         if buffer[0..<n].contains(UInt8(ascii: "\n")) { break }
                     }
-                    close(fd)
                     let line = String(data: response, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     continuation.resume(returning: line)
                 } catch { continuation.resume(throwing: error) }
