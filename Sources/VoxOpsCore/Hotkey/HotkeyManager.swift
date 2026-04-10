@@ -85,6 +85,9 @@ public final class HotkeyManager: @unchecked Sendable {
     }
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        lock.lock()
+        defer { lock.unlock() }
+
         let eventKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let modifierMask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
         let activeModifiers = event.flags.intersection(modifierMask)
@@ -95,7 +98,10 @@ public final class HotkeyManager: @unchecked Sendable {
             let requiredModifiers = voiceTrigger.cgEventFlags
             if !activeModifiers.contains(requiredModifiers) {
                 isVoiceActive = false
-                onKeyUp?()
+                let handler = onKeyUp
+                lock.unlock()
+                handler?()
+                lock.lock()
             }
             return Unmanaged.passUnretained(event)
         }
@@ -107,7 +113,10 @@ public final class HotkeyManager: @unchecked Sendable {
                 if !isAutoRepeat {
                     isToggleMode = !isToggleMode
                     isVoiceActive = isToggleMode
-                    onToggleListening?()
+                    let handler = onToggleListening
+                    lock.unlock()
+                    handler?()
+                    lock.lock()
                 }
                 return nil
             }
@@ -118,7 +127,10 @@ public final class HotkeyManager: @unchecked Sendable {
             let required = chat.cgEventFlags
             if required.isEmpty || activeModifiers.contains(required) {
                 if !isAutoRepeat {
-                    onChatToggle?()
+                    let handler = onChatToggle
+                    lock.unlock()
+                    handler?()
+                    lock.lock()
                 }
                 return nil
             }
@@ -143,13 +155,19 @@ public final class HotkeyManager: @unchecked Sendable {
             }
             if !isAutoRepeat {
                 isVoiceActive = true
-                onKeyDown?()
+                let handler = onKeyDown
+                lock.unlock()
+                handler?()
+                lock.lock()
             }
             return nil
         case .keyUp:
             guard isVoiceActive else { return Unmanaged.passUnretained(event) }
             isVoiceActive = false
-            onKeyUp?()
+            let handler = onKeyUp
+            lock.unlock()
+            handler?()
+            lock.lock()
             return nil
         default:
             return Unmanaged.passUnretained(event)

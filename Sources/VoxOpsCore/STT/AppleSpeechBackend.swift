@@ -68,14 +68,31 @@ public final class AppleSpeechBackend: STTBackend, @unchecked Sendable {
             request.requiresOnDeviceRecognition = true
         }
 
-        let result: SFSpeechRecognitionResult = try await withCheckedThrowingContinuation { cont in
-            recognizer.recognitionTask(with: request) { result, error in
-                if let error = error {
-                    cont.resume(throwing: error)
-                } else if let result = result, result.isFinal {
-                    cont.resume(returning: result)
+        let result: SFSpeechRecognitionResult = try await withThrowingTaskGroup(of: SFSpeechRecognitionResult.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { cont in
+                    let task = recognizer.recognitionTask(with: request) { result, error in
+                        if let error = error {
+                            cont.resume(throwing: error)
+                        } else if let result = result, result.isFinal {
+                            cont.resume(returning: result)
+                        }
+                    }
+                    // Cancel recognition if task is cancelled
+                    Task {
+                        await withTaskCancellationHandler { } onCancel: { task.cancel() }
+                    }
                 }
             }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 30_000_000_000) // 30s timeout
+                throw AppleSpeechError.recognizerUnavailable
+            }
+            guard let result = try await group.next() else {
+                throw AppleSpeechError.recognizerUnavailable
+            }
+            group.cancelAll()
+            return result
         }
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime

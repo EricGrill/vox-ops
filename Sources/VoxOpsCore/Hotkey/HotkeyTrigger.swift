@@ -26,14 +26,14 @@ public enum ModifierKey: String, Codable, CaseIterable, Comparable, Sendable {
     // Comparable — sort order for serialization: command, control, option, shift
     public static func < (lhs: ModifierKey, rhs: ModifierKey) -> Bool {
         let order: [ModifierKey] = [.command, .control, .option, .shift]
-        return order.firstIndex(of: lhs)! < order.firstIndex(of: rhs)!
+        return (order.firstIndex(of: lhs) ?? 0) < (order.firstIndex(of: rhs) ?? 0)
     }
 
     // Display sort order follows macOS convention: control, option, shift, command
     static let displayOrder: [ModifierKey] = [.control, .option, .shift, .command]
 
     var displaySortIndex: Int {
-        Self.displayOrder.firstIndex(of: self)!
+        Self.displayOrder.firstIndex(of: self) ?? 0
     }
 }
 
