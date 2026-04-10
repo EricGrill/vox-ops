@@ -17,7 +17,7 @@ public final class AudioManager: @unchecked Sendable {
         recordedData = Data()
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
-        let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+        guard let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else { return }
         let busFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: busFormat) { [weak self] buffer, _ in
             guard let self else { return }
@@ -79,7 +79,7 @@ public final class AudioManager: @unchecked Sendable {
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
             let busFormat = inputNode.outputFormat(forBus: 0)
-            let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+            guard let recordingFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true) else { return }
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: busFormat) { [weak self] buffer, _ in
                 guard let self else { return }
                 if let converted = self.convert(buffer: buffer, to: recordingFormat) {
@@ -107,9 +107,11 @@ public final class AudioManager: @unchecked Sendable {
             outStatus.pointee = .haveData
             return buffer
         }
-        guard error == nil, outputBuffer.frameLength > 0 else { return nil }
+        guard error == nil, outputBuffer.frameLength > 0,
+              let channelData = outputBuffer.int16ChannelData?[0]
+        else { return nil }
         let byteCount = Int(outputBuffer.frameLength) * MemoryLayout<Int16>.size
-        return Data(bytes: outputBuffer.int16ChannelData![0], count: byteCount)
+        return Data(bytes: channelData, count: byteCount)
     }
 }
 

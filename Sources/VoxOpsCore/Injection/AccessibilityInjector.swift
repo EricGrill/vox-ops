@@ -18,6 +18,9 @@ public final class AccessibilityInjector: Sendable {
         guard focusErr == .success, let element = focusedElement else {
             return InjectionResult(success: false, strategy: .accessibility, error: "Cannot get focused element")
         }
+        guard CFGetTypeID(element) == AXUIElementGetTypeID() else {
+            return InjectionResult(success: false, strategy: .accessibility, error: "Focused element is not an AXUIElement")
+        }
         let axElement = element as! AXUIElement
 
         // Try inserting at selected text range
