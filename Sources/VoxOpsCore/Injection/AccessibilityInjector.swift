@@ -21,7 +21,8 @@ public final class AccessibilityInjector: Sendable {
         guard CFGetTypeID(element) == AXUIElementGetTypeID() else {
             return InjectionResult(success: false, strategy: .accessibility, error: "Focused element is not an AXUIElement")
         }
-        let axElement = element as! AXUIElement
+        // swiftlint:disable:next force_cast — guarded by CFGetTypeID check above
+        let axElement = element as! AXUIElement // Safe: CFGetTypeID verified
 
         // Try inserting at selected text range
         var selectedRange: CFTypeRef?

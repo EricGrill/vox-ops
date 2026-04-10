@@ -6,10 +6,11 @@ public struct DictationFormatter: TextFormatter {
     private let fillerPattern: NSRegularExpression
 
     public init() {
-        fillerPattern = try! NSRegularExpression(
+        // Pattern is hardcoded and known-valid; fallback to match-nothing if it ever fails
+        fillerPattern = (try? NSRegularExpression(
             pattern: #"(?i)(?:^|(?<=[.!?]\s))(um|uh|like|you know|basically|actually|so,)\s*"#,
             options: []
-        )
+        )) ?? NSRegularExpression()
     }
 
     public func format(_ text: String) -> String {
