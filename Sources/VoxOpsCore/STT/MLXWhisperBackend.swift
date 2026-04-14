@@ -118,7 +118,11 @@ public final class MLXWhisperBackend: STTBackend, @unchecked Sendable {
             throw SidecarError.encodingFailed
         }
         let decoded = try JSONDecoder().decode(TranscriptJSON.self, from: jsonData)
+        let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
         lock.lock(); _status = .ready; lock.unlock()
-        return TranscriptResult(text: decoded.text, confidence: decoded.confidence ?? 0.9, latencyMs: Int(elapsed * 1000), backend: id)
+        guard !text.isEmpty else {
+            return TranscriptResult(text: "", confidence: 0, latencyMs: Int(elapsed * 1000), backend: id)
+        }
+        return TranscriptResult(text: text, confidence: decoded.confidence ?? 0.9, latencyMs: Int(elapsed * 1000), backend: id)
     }
 }

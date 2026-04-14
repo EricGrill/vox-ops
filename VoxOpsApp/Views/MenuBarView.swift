@@ -37,7 +37,10 @@ struct MenuBarView: View {
             Button("Settings...") { appState.openSettings() }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
-            Button("Quit VoxOps") { NSApplication.shared.terminate(nil) }
+            Button("Quit VoxOps") {
+                appState.teardown()
+                NSApplication.shared.terminate(nil)
+            }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
             Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")

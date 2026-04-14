@@ -48,6 +48,20 @@ final class AppState: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.setup() }
     }
 
+    func teardown() {
+        hotkeyManager?.stop()
+        hotkeyManager = nil
+        _ = audioManager?.stopRecording()
+        audioManager = nil
+        Task { await agentClientManager.disconnectAll() }
+        if let backend = activeBackend {
+            Task { await backend.stop() }
+            activeBackend = nil
+        }
+        database = nil
+        NSLog("[VoxOps] AppState teardown complete")
+    }
+
     func setup() {
         do {
             guard let appSupportBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
@@ -359,11 +373,21 @@ final class AppState: ObservableObject {
             guard let url = URL(string: server.url) else { return }
             let client = OpenClawClient(serverId: server.id, url: url, token: token ?? "")
             agentClientManager.register(client: client)
-            try? await client.connect()
+            do {
+                try await client.connect()
+                NSLog("[VoxOps] Connected to OpenClaw server %@", server.url)
+            } catch {
+                NSLog("[VoxOps] Failed to connect to OpenClaw server %@: %@", server.url, error.localizedDescription)
+            }
         case .hermes:
             guard let client = try? HermesClient(server: server, token: token) else { return }
             agentClientManager.register(client: client)
-            try? await client.connect()
+            do {
+                try await client.connect()
+                NSLog("[VoxOps] Connected to Hermes server %@", server.url)
+            } catch {
+                NSLog("[VoxOps] Failed to connect to Hermes server %@: %@", server.url, error.localizedDescription)
+            }
         }
     }
 
@@ -456,6 +480,10 @@ final class AppState: ObservableObject {
                 let processStart = Date()
                 let result = try await backend.transcribe(audio: audio)
                 let latencyMs = Int(Date().timeIntervalSince(processStart) * 1000)
+                guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    voxState = .idle
+                    return
+                }
                 let replacer = CustomWordReplacer(entries: customWords)
                 let corrected = replacer.apply(result.text)
                 let formatted = formatterRegistry.active(name: activeFormatterName).format(corrected)
@@ -478,9 +506,13 @@ final class AppState: ObservableObject {
                     voxState = .error("No injector")
                 }
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
+                // Only reset to idle if still showing success (not overwritten by another action)
                 if case .success = voxState { voxState = .idle }
+                else if case .error = voxState { voxState = .idle }
             } catch {
                 voxState = .error("STT failed: \(error.localizedDescription)")
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if case .error = voxState { voxState = .idle }
             }
         }
     }

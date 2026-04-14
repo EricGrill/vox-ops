@@ -81,8 +81,13 @@ public final class WhisperCppBackend: STTBackend, @unchecked Sendable {
             lock.lock(); _status = .error("Bad JSON: \(String(jsonLine.prefix(80)))"); lock.unlock()
             throw SidecarError.encodingFailed
         }
+        let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            lock.lock(); _status = .ready; lock.unlock()
+            return TranscriptResult(text: "", confidence: 0, latencyMs: Int(elapsed * 1000), backend: id)
+        }
         lock.lock(); _status = .ready; lock.unlock()
 
-        return TranscriptResult(text: decoded.text, confidence: decoded.confidence ?? 0.9, latencyMs: Int(elapsed * 1000), backend: id)
+        return TranscriptResult(text: text, confidence: decoded.confidence ?? 0.9, latencyMs: Int(elapsed * 1000), backend: id)
     }
 }

@@ -211,9 +211,22 @@ public final class OpenClawClient: AgentClient, @unchecked Sendable {
         self.token = token
     }
 
+    deinit {
+        receiveTask?.cancel()
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        session?.invalidateAndCancel()
+        for continuation in pendingStreams.values { continuation.finish(throwing: CancellationError()) }
+        for continuation in runStreams.values { continuation.finish(throwing: CancellationError()) }
+        for handler in responseHandlers.values { handler.resume(throwing: CancellationError()) }
+    }
+
     // MARK: - AgentClient Conformance
 
     public func connect() async throws {
+        lock.lock()
+        if isConnected { lock.unlock(); return }
+        lock.unlock()
+
         let session = URLSession(configuration: .default)
 
         // Build request with Origin header for control-ui auth
