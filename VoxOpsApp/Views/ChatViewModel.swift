@@ -56,6 +56,13 @@ final class ChatViewModel: ObservableObject {
                 bubbles[bubbleIndex].text = "[Error: Server not connected]"
                 return
             }
+            // Attempt reconnect if needed
+            do {
+                try await client.connect()
+            } catch {
+                bubbles[bubbleIndex].text = "[Error: Cannot connect to server: \(error.localizedDescription)]"
+                return
+            }
             let stream = client.send(messages: messages, agentId: agent.agentId)
             do {
                 for try await event in stream {
