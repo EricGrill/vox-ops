@@ -34,7 +34,8 @@ public final class HotkeyManager: @unchecked Sendable {
     public func start() throws {
         lock.lock()
         defer { lock.unlock() }
-        guard AXIsProcessTrusted() else { throw HotkeyError.accessibilityNotGranted }
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(opts) else { throw HotkeyError.accessibilityNotGranted }
 
         let eventMask = (1 << CGEventType.keyDown.rawValue)
                       | (1 << CGEventType.keyUp.rawValue)
@@ -46,7 +47,7 @@ public final class HotkeyManager: @unchecked Sendable {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: .listenOnly,
             eventsOfInterest: CGEventMask(eventMask),
             callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
                 guard let refcon = refcon else { return Unmanaged.passUnretained(event) }

@@ -40,8 +40,8 @@ targets:
       INFOPLIST_FILE: VoxOpsApp/Info.plist
       CODE_SIGN_ENTITLEMENTS: VoxOpsApp/VoxOpsApp.entitlements
       PRODUCT_BUNDLE_IDENTIFIER: com.voxops.app
-      CODE_SIGNING_ALLOWED: "NO"
-      CODE_SIGN_IDENTITY: ""
+      CODE_SIGNING_ALLOWED: "YES"
+      CODE_SIGN_IDENTITY: "-"
     postCompileScripts:
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/whisper-sidecar"

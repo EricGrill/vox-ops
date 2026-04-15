@@ -19,7 +19,8 @@ struct OpenClawClientTests {
         #expect(json["method"] as? String == "connect")
         #expect(json["id"] as? String == id)
         let params = json["params"] as? [String: Any]
-        #expect(params?["token"] as? String == token)
+        let auth = params?["auth"] as? [String: Any]
+        #expect(auth?["token"] as? String == token)
     }
 
     @Test("builds agents.list frame")
@@ -65,33 +66,39 @@ struct OpenClawClientTests {
 
     @Test("parses agent text event with runId and textChunk")
     func parsesAgentTextEvent() throws {
-        let payload = """
-        {"type":"event","runId":"run-abc","event":{"kind":"textChunk","text":"Hello world"}}
-        """.data(using: .utf8)!
+        let json: [String: Any] = [
+            "type": "event",
+            "runId": "run-abc",
+            "payload": ["kind": "textChunk", "text": "Hello world"]
+        ]
 
-        let result = try OpenClawFrames.parseEvent(from: payload)
+        let result = try OpenClawFrames.parseStreamEvent(from: json)
         #expect(result.runId == "run-abc")
         #expect(result.event == .textChunk("Hello world"))
     }
 
     @Test("parses agent done event returns nil event")
     func parsesAgentDoneEvent() throws {
-        let payload = """
-        {"type":"event","runId":"run-abc","event":{"kind":"done"}}
-        """.data(using: .utf8)!
+        let json: [String: Any] = [
+            "type": "event",
+            "runId": "run-abc",
+            "payload": ["kind": "done"]
+        ]
 
-        let result = try OpenClawFrames.parseEvent(from: payload)
+        let result = try OpenClawFrames.parseStreamEvent(from: json)
         #expect(result.runId == "run-abc")
         #expect(result.event == nil)
     }
 
     @Test("parses agent error event")
     func parsesAgentErrorEvent() throws {
-        let payload = """
-        {"type":"event","runId":"run-abc","event":{"kind":"error","message":"Something went wrong"}}
-        """.data(using: .utf8)!
+        let json: [String: Any] = [
+            "type": "event",
+            "runId": "run-abc",
+            "payload": ["kind": "error", "message": "Something went wrong"]
+        ]
 
-        let result = try OpenClawFrames.parseEvent(from: payload)
+        let result = try OpenClawFrames.parseStreamEvent(from: json)
         #expect(result.runId == "run-abc")
         #expect(result.event == .error("Something went wrong"))
     }
